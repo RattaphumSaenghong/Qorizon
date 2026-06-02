@@ -1,0 +1,49 @@
+# ── Dependencies ──────────────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Env / secrets ─────────────────────────────────────────────
+.env
+.env.*.local
+.env.local
+**/.env.local
+**/.env*.local
+
+# ── Expo / Metro ──────────────────────────────────────────────
+.expo/
+**/.expo/
+dist/
+**/dist/
+web-build/
+expo-env.d.ts
+.metro-health-check*
+
+# ── Native ────────────────────────────────────────────────────
+/trailr/ios
+/trailr/android
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+
+# ── Supabase ──────────────────────────────────────────────────
+# Local stack temp files; keep migrations/ + seed.sql + config.toml tracked
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+
+# ── TypeScript ────────────────────────────────────────────────
+*.tsbuildinfo
+
+# ── Logs ──────────────────────────────────────────────────────
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# ── OS ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

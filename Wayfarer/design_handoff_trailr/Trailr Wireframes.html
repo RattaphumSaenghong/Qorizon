@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trailr — Wireframes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Caveat:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #2c2a26;
+    --sub: #9b958a;
+    --paper: #fbf9f5;
+    --panel: #f3efe7;
+    --line: #cdc6b8;
+    --bar: #ddd7c9;
+    --grid: #e8e3d7;
+    --acc: #e07a5f;
+    --accSoft: color-mix(in srgb, var(--acc) 18%, var(--paper));
+    --map: #e9ece3;
+    --mapline: #d4d9cb;
+    --mapwater: #d9e5e1;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #f0eee9; }
+
+  .wf, .wf * { font-family: 'Patrick Hand', cursive; -webkit-font-smoothing: antialiased; }
+  .wf { color: var(--ink); }
+
+  /* hand-drawn borders */
+  .sk { border: 2px solid var(--ink); border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px; }
+  .sk2 { border: 2px solid var(--ink); border-radius: 15px 225px 15px 255px / 225px 15px 255px 15px; }
+
+  .hatch { background-image: repeating-linear-gradient(45deg, #e9e3d6 0, #e9e3d6 5px, #f3efe6 5px, #f3efe6 11px); }
+  .mono { font-family: 'Courier New', ui-monospace, monospace !important; }
+  .note { font-family: 'Caveat', cursive; }
+
+  /* paper grain (tweak) */
+  .wf-grain .wf-screen {
+    background-image: radial-gradient(rgba(120,110,90,0.05) 1px, transparent 1.4px);
+    background-size: 7px 7px;
+  }
+  /* hide annotations (tweak) */
+  .wf-no-notes .note { display: none !important; }
+  /* clean (non-handwritten) font (tweak) */
+  .wf-clean .wf, .wf-clean .wf *:not(.mono) {
+    font-family: 'Avenir Next', 'Segoe UI', system-ui, sans-serif !important;
+    letter-spacing: -0.1px;
+  }
+
+  #root { height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" fill="#fbf9f5" />
+    <rect x="30" y="30" width="40" height="40" rx="6" fill="none" stroke="#2c2a26" stroke-width="3" />
+    <path d="M38 60 C44 48 50 44 58 36" stroke="#e07a5f" stroke-width="3" stroke-dasharray="1 5" stroke-linecap="round" fill="none" />
+    <circle cx="58" cy="36" r="4" fill="#e07a5f" />
+  </svg>
+</template>
+
+<!-- seed a sensible overview zoom on first load only -->
+<script>
+  (function () {
+    try {
+      var key = 'dc-viewport:' + location.pathname;
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, JSON.stringify({ x: 80, y: 24, scale: 0.42 }));
+      }
+    } catch (e) {}
+  })();
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="wf-kit.jsx"></script>
+<script type="text/babel" src="wf-feed.jsx"></script>
+<script type="text/babel" src="wf-journal.jsx"></script>
+<script type="text/babel" src="wf-builder.jsx"></script>
+<script type="text/babel" src="wf-more.jsx"></script>
+
+<script type="text/babel">
+  const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+    "accent": "#e07a5f",
+    "annotations": true,
+    "handwriting": true,
+    "grain": false
+  }/*EDITMODE-END*/;
+
+  function App() {
+    const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+    React.useEffect(() => {
+      const r = document.documentElement;
+      r.style.setProperty('--acc', t.accent);
+      r.classList.toggle('wf-no-notes', !t.annotations);
+      r.classList.toggle('wf-grain', !!t.grain);
+      r.classList.toggle('wf-clean', !t.handwriting);
+    }, [t]);
+
+    return (
+      <React.Fragment>
+        <DesignCanvas>
+          <DCSection id="feed" title="Home Feed" subtitle="Location-embedded social feed · Instagram-ref · 3 approaches">
+            <DCArtboard id="feedA" label="A · Split — feed + live map" width={ARTW} height={ARTH}><FeedA /></DCArtboard>
+            <DCArtboard id="feedB" label="B · Map-first / immersive" width={ARTW} height={ARTH}><FeedB /></DCArtboard>
+            <DCArtboard id="feedC" label="C · Explore grid + context rail" width={ARTW} height={ARTH}><FeedC /></DCArtboard>
+          </DCSection>
+
+          <DCSection id="journal" title="Trip Journal" subtitle="Tap a post → the whole trip as a journal / trail · 3 approaches">
+            <DCArtboard id="jrnlA" label="A · Journal feed + sticky trail map" width={ARTW} height={ARTH}><JournalA /></DCArtboard>
+            <DCArtboard id="jrnlB" label="B · Map-led journey + day scrubber" width={ARTW} height={ARTH}><JournalB /></DCArtboard>
+            <DCArtboard id="jrnlC" label="C · Scrapbook spread (diary)" width={ARTW} height={ARTH}><JournalC /></DCArtboard>
+          </DCSection>
+
+          <DCSection id="builder" title="Trip Builder" subtitle="Canva-style blueprint editor · 3 approaches">
+            <DCArtboard id="buildA" label="A · Blocks + canvas + inspector" width={ARTW} height={ARTH}><BuildA /></DCArtboard>
+            <DCArtboard id="buildB" label="B · Day timeline + map" width={ARTW} height={ARTH}><BuildB /></DCArtboard>
+            <DCArtboard id="buildC" label="C · Day board (columns)" width={ARTW} height={ARTH}><BuildC /></DCArtboard>
+          </DCSection>
+
+          <DCSection id="album" title="GPS Auto-Album" subtitle="Photos auto-grouped from GPS + time · 2 approaches">
+            <DCArtboard id="albumA" label="A · Day-cluster grid + trail" width={ARTW} height={ARTH}><AlbumA /></DCArtboard>
+            <DCArtboard id="albumB" label="B · Photo-pinned map story" width={ARTW} height={ARTH}><AlbumB /></DCArtboard>
+          </DCSection>
+
+          <DCSection id="booking" title="One-Click Booking" subtitle="Flights + hotels, commission model · 2 approaches">
+            <DCArtboard id="bookA" label="A · Inline in the trip" width={ARTW} height={ARTH}><BookA /></DCArtboard>
+            <DCArtboard id="bookB" label="B · Dedicated search panel" width={ARTW} height={ARTH}><BookB /></DCArtboard>
+          </DCSection>
+
+          <DCSection id="profile" title="Profile / Trip Cards" subtitle="Forkable trips, social graph · 2 approaches">
+            <DCArtboard id="profA" label="A · IG profile + trip grid" width={ARTW} height={ARTH}><ProfA /></DCArtboard>
+            <DCArtboard id="profB" label="B · Map-of-travels profile" width={ARTW} height={ARTH}><ProfB /></DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+
+        <TweaksPanel>
+          <TweakSection label="Brand" />
+          <TweakColor label="Accent" value={t.accent}
+            options={['#e07a5f', '#3d9a8b', '#6b6fd6', '#8a8073']}
+            onChange={(v) => setTweak('accent', v)} />
+          <TweakSection label="Wireframe" />
+          <TweakToggle label="Annotations" value={t.annotations} onChange={(v) => setTweak('annotations', v)} />
+          <TweakToggle label="Handwritten font" value={t.handwriting} onChange={(v) => setTweak('handwriting', v)} />
+          <TweakToggle label="Paper grain" value={t.grain} onChange={(v) => setTweak('grain', v)} />
+        </TweaksPanel>
+      </React.Fragment>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
