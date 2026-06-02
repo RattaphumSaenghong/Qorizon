@@ -1,6 +1,7 @@
-﻿/**
- * Feed screen â€” FeedA: split feed + live map
- * Real mock data, tap post â†’ Journal
+/**
+ * Feed screen — FeedA: split feed + live map
+ * Reads live data from Supabase via useFeedStops.
+ * Falls back to public trips when not signed in.
  */
 import React, { useState } from 'react';
 import {
@@ -10,31 +11,60 @@ import {
   StyleSheet,
   TouchableOpacity,
   Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
 import { colors, spacing, fontSize } from '../../src/theme/tokens';
 import { TopBar } from '../../src/components/TopBar';
 import { MapView } from '../../src/components/MapView';
 import { Chip } from '../../src/components/Chip';
 import { Avatar } from '../../src/components/Avatar';
-import { MOCK_TRIPS, Trip, getAllMoments } from '../../src/data/mockTrips';
+import { useAuthStore } from '../../src/stores/authStore';
+import { getSupabaseClient } from '@trailr/db';
+import type { FeedStop, StopWithMedia } from '@trailr/db';
 
 const FILTERS = ['Following', 'Nearby', 'For you'];
 
-// All moments from all trips as map pins
-function useFeedPins(router: ReturnType<typeof useRouter>) {
-  return getAllMoments().map((m) => ({
-    id: `${m.tripId}-${m.longitude}-${m.latitude}`,
-    latitude: m.latitude,
-    longitude: m.longitude,
-    location: m.location,
-    caption: m.caption,
-    hasVideo: m.hasVideo,
-    onPress: () => router.push(`/journal/${m.tripId}`),
-  }));
+// ── Fetch functions ──────────────────────────────────────────
+async function fetchFollowingFeedStops(userId: string): Promise<FeedStop[]> {
+  const db = getSupabaseClient() as any;
+
+  const { data: follows } = await db
+    .from('follows').select('following_id').eq('follower_id', userId);
+  const ids = (follows ?? []).map((f: any) => f.following_id as string);
+  if (ids.length === 0) return [];
+
+  const { data, error } = await db
+    .from('stops')
+    .select(`*, media(*), author:users!stops_user_id_fkey(id,username,display_name,avatar_url), trip:trips!stops_trip_id_fkey(id,title,cover_image_url)`)
+    .eq('status', 'visited')
+    .in('user_id', ids)
+    .order('captured_at', { ascending: false })
+    .limit(30);
+  if (error) throw error;
+
+  const stopIds = (data ?? []).map((s: any) => s.id as string);
+  const { data: likes } = await db.from('likes').select('stop_id').eq('user_id', userId).in('stop_id', stopIds);
+  const likedSet = new Set((likes ?? []).map((l: any) => l.stop_id));
+
+  return (data ?? []).map((s: any) => ({ ...s, is_liked: likedSet.has(s.id), is_saved: false }));
 }
 
-function FeedCard({ trip, index, onPress }: { trip: Trip; index: number; onPress: () => void }) {
+async function fetchPublicStops(): Promise<StopWithMedia[]> {
+  const db = getSupabaseClient() as any;
+  const { data, error } = await db
+    .from('stops')
+    .select(`*, media(*), author:users!stops_user_id_fkey(id,username,display_name,avatar_url), trip:trips!stops_trip_id_fkey(id,title,cover_image_url)`)
+    .eq('status', 'visited')
+    .order('captured_at', { ascending: false })
+    .limit(30);
+  if (error) throw error;
+  return data ?? [];
+}
+
+// ── Feed card ────────────────────────────────────────────────
+function FeedCard({ stop, onPress }: { stop: any; onPress: () => void }) {
   const [pressed, setPressed] = useState(false);
 
   return (
@@ -44,60 +74,74 @@ function FeedCard({ trip, index, onPress }: { trip: Trip; index: number; onPress
       onPressOut={() => setPressed(false)}
       style={[styles.card, pressed && styles.cardPressed]}
     >
-      {/* header */}
       <View style={styles.cardHeader}>
         <Avatar size={38} ring />
         <View style={styles.cardUserInfo}>
-          <Text style={styles.cardHandle}>{trip.authorHandle}</Text>
+          <Text style={styles.cardHandle}>
+            @{stop.author?.username ?? 'unknown'}
+          </Text>
           <Chip dot accent style={styles.locationChip}>
-            {trip.coverLocation}
+            {stop.location_name ?? 'Unknown location'}
           </Chip>
-        </View>
-        <View style={styles.pinBadge}>
-          <Text style={styles.pinNum}>{index + 1}</Text>
         </View>
       </View>
 
-      {/* photo */}
       <View style={styles.cardPhoto}>
-        <Text style={styles.photoLabel}>[ trip photo ]</Text>
-        {trip.forkedFrom && (
-          <View style={styles.forkBadge}>
-            <Text style={styles.forkBadgeText}>â‘‚ based on {trip.forkedFrom}</Text>
+        <Text style={styles.photoLabel}>[ photo ]</Text>
+        {stop.trip && (
+          <View style={styles.tripBadge}>
+            <Text style={styles.tripBadgeText}>✈ {stop.trip.title}</Text>
           </View>
         )}
       </View>
 
-      {/* actions */}
       <View style={styles.cardActions}>
-        <Text style={styles.actionIcon}>â™¡</Text>
-        <Text style={styles.actionCount}>{trip.likeCount.toLocaleString()}</Text>
-        <Text style={styles.actionIcon}>â–¢</Text>
-        <Text style={styles.actionIcon}>â†—</Text>
+        <Text style={[styles.actionIcon, stop.is_liked && styles.likedIcon]}>♡</Text>
+        <Text style={styles.actionCount}>{stop.like_count ?? 0}</Text>
+        <Text style={styles.actionIcon}>▢</Text>
+        <Text style={styles.actionIcon}>↗</Text>
         <View style={{ flex: 1 }} />
-        <Chip dot={false}>â‘‚ {trip.forkCount} forks</Chip>
+        <Text style={styles.actionCount}>{stop.comment_count ?? 0} comments</Text>
       </View>
 
-      {/* caption */}
       <View style={styles.cardCaption}>
-        <Text style={styles.cardTitle} numberOfLines={1}>{trip.title}</Text>
-        <Text style={styles.cardSub} numberOfLines={2}>
-          {trip.days[0].moments[0].caption}
+        <Text style={styles.cardCaptionText} numberOfLines={3}>
+          {stop.caption ?? ''}
         </Text>
       </View>
 
-      {/* tap hint */}
       <View style={styles.tapHint}>
-        <Text style={styles.tapHintText}>View full trip journal â†’</Text>
+        <Text style={styles.tapHintText}>View full trip journal →</Text>
       </View>
     </Pressable>
   );
 }
 
+// ── Main screen ──────────────────────────────────────────────
 export default function FeedScreen() {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuthStore();
   const [activeFilter, setActiveFilter] = useState('Following');
-  const pins = useFeedPins(router);
+
+  // Fetch following feed if signed in, else public stops
+  const { data: stops = [], isLoading } = useQuery({
+    queryKey: user ? ['feed', 'following', user.id] : ['feed', 'public'],
+    queryFn: () => user ? fetchFollowingFeedStops(user.id) : fetchPublicStops(),
+    staleTime: 1000 * 30,
+  });
+
+  // Map pins from live stops
+  const pins = stops
+    .filter((s: any) => s.latitude && s.longitude)
+    .map((s: any) => ({
+      id: s.id,
+      latitude: s.latitude,
+      longitude: s.longitude,
+      location: s.location_name ?? '',
+      caption: s.caption ?? '',
+      hasVideo: s.media?.some((m: any) => m.type === 'video'),
+      onPress: () => router.push(`/journal/${s.trip?.id ?? s.trip_id}`),
+    }));
 
   return (
     <View style={styles.root}>
@@ -110,7 +154,7 @@ export default function FeedScreen() {
         }}
       />
       <View style={styles.body}>
-        {/* â”€â”€ Left: feed column â”€â”€ */}
+        {/* ── Left: feed ── */}
         <View style={styles.feedCol}>
           <View style={styles.filters}>
             {FILTERS.map((f) => (
@@ -119,22 +163,34 @@ export default function FeedScreen() {
               </TouchableOpacity>
             ))}
           </View>
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.feedScroll}
-          >
-            {MOCK_TRIPS.map((trip, i) => (
-              <FeedCard
-                key={trip.id}
-                trip={trip}
-                index={i}
-                onPress={() => router.push(`/journal/${trip.id}`)}
-              />
-            ))}
-          </ScrollView>
+
+          {isLoading || authLoading ? (
+            <View style={styles.center}>
+              <ActivityIndicator color={colors.acc} size="large" />
+            </View>
+          ) : stops.length === 0 ? (
+            <View style={styles.center}>
+              <Text style={styles.emptyText}>
+                {user ? 'Follow someone to see their trips here.' : 'No trips yet.'}
+              </Text>
+            </View>
+          ) : (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.feedScroll}
+            >
+              {stops.map((stop: any) => (
+                <FeedCard
+                  key={stop.id}
+                  stop={stop}
+                  onPress={() => router.push(`/journal/${stop.trip?.id ?? stop.trip_id}`)}
+                />
+              ))}
+            </ScrollView>
+          )}
         </View>
 
-        {/* â”€â”€ Right: live interactive map â”€â”€ */}
+        {/* ── Right: live interactive map ── */}
         <View style={styles.mapCol}>
           <MapView
             initialLongitude={136.0}
@@ -142,10 +198,11 @@ export default function FeedScreen() {
             initialZoom={4}
             posts={pins}
           >
-            {/* live badge overlay */}
             <View style={styles.liveBadge} pointerEvents={'none'}>
               <View style={styles.liveDot} />
-              <Text style={styles.liveBadgeText}>{pins.length} posts on map</Text>
+              <Text style={styles.liveBadgeText}>
+                {pins.length} stops on map
+              </Text>
             </View>
           </MapView>
         </View>
@@ -157,7 +214,6 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.paper },
   body: { flex: 1, flexDirection: 'row' },
-
   feedCol: {
     width: 520,
     borderRightWidth: 1,
@@ -172,10 +228,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.line,
   },
-  feedScroll: {
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
+  feedScroll: { padding: spacing.lg, gap: spacing.md },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  emptyText: { fontSize: fontSize.md, color: colors.sub, textAlign: 'center' },
 
   card: {
     backgroundColor: colors.paper,
@@ -183,12 +238,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     overflow: 'hidden',
-    gap: 0,
   },
-  cardPressed: {
-    opacity: 0.92,
-    borderColor: colors.acc,
-  },
+  cardPressed: { opacity: 0.92, borderColor: colors.acc },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -199,17 +250,6 @@ const styles = StyleSheet.create({
   cardUserInfo: { flex: 1, gap: 4 },
   cardHandle: { fontSize: fontSize.sm, fontWeight: '600', color: colors.ink },
   locationChip: { alignSelf: 'flex-start' },
-  pinBadge: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: colors.panel,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pinNum: { fontSize: fontSize.xs, fontWeight: '700', color: colors.sub },
 
   cardPhoto: {
     height: 200,
@@ -219,7 +259,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   photoLabel: { fontSize: fontSize.sm, color: colors.sub, fontFamily: 'monospace' },
-  forkBadge: {
+  tripBadge: {
     position: 'absolute',
     bottom: 8,
     left: 8,
@@ -230,7 +270,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
   },
-  forkBadgeText: { fontSize: fontSize.xs, color: colors.sub },
+  tripBadgeText: { fontSize: fontSize.xs, color: colors.sub },
 
   cardActions: {
     flexDirection: 'row',
@@ -240,52 +280,16 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   actionIcon: { fontSize: 20, color: colors.ink },
+  likedIcon: { color: colors.acc },
   actionCount: { fontSize: fontSize.sm, color: colors.sub },
 
-  cardCaption: {
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-    gap: 4,
-  },
-  cardTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.ink },
-  cardSub: { fontSize: fontSize.sm, color: colors.sub, lineHeight: 18 },
+  cardCaption: { paddingHorizontal: spacing.md, paddingBottom: spacing.sm },
+  cardCaptionText: { fontSize: fontSize.sm, color: colors.ink, lineHeight: 20 },
 
-  tapHint: {
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
-  },
+  tapHint: { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
   tapHintText: { fontSize: fontSize.xs, color: colors.acc, fontWeight: '600' },
 
   mapCol: { flex: 1, position: 'relative' },
-
-  miniPreview: {
-    position: 'absolute',
-    left: '42%',
-    top: '12%',
-    flexDirection: 'row',
-    gap: 8,
-    backgroundColor: colors.paper,
-    padding: 8,
-    width: 180,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.line,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
-  },
-  miniPhoto: {
-    width: 44,
-    height: 44,
-    backgroundColor: colors.panel,
-    borderRadius: 6,
-  },
-  miniMeta: { flex: 1, justifyContent: 'center', gap: 4 },
-  miniTitle: { fontSize: fontSize.sm, fontWeight: '600', color: colors.ink },
-  miniSub: { fontSize: fontSize.xs, color: colors.sub },
-
   liveBadge: {
     position: 'absolute',
     right: 16,
@@ -299,13 +303,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.line,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 2,
   },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.acc },
   liveBadgeText: { fontSize: fontSize.sm, color: colors.ink },
 });
-
