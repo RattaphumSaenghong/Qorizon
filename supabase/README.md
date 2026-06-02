@@ -26,11 +26,11 @@ product's Plan↔Story duality.
 
 | File | What |
 |---|---|
-| `migrations/0001_schema.sql`            | Tables |
-| `migrations/0002_indexes.sql`           | Indexes tuned to the query shapes |
-| `migrations/0003_functions_triggers.sql`| Counters, `updated_at`, auth bootstrap, `fork_trip()` |
-| `migrations/0004_rls.sql`               | Row Level Security (default deny) |
-| `seed.sql`                              | 3 users + 3 trips mirroring `mockTrips.ts` |
+| `migrations/20260602000001_schema.sql`            | Tables |
+| `migrations/20260602000002_indexes.sql`           | Indexes tuned to the query shapes |
+| `migrations/20260602000003_functions_triggers.sql`| Counters, `updated_at`, auth bootstrap, `fork_trip()` |
+| `migrations/20260602000004_rls.sql`               | Row Level Security (default deny) |
+| `seed.sql`                                         | 3 users + 3 trips mirroring `mockTrips.ts` |
 
 ## Apply it
 
