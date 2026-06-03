@@ -5,6 +5,7 @@ import { colors, spacing, fontSize, TOP_BAR_H } from '../theme/tokens';
 import { Wordmark } from './Wordmark';
 import { Avatar } from './Avatar';
 import { Btn } from './Btn';
+import { useAuthStore } from '../stores/authStore';
 
 interface Props {
   active?: string;
@@ -20,6 +21,7 @@ export function TopBar({
   onTabPress,
 }: Props) {
   const router = useRouter();
+  const user = useAuthStore((s) => s.user);
   return (
     <View style={styles.bar}>
       <Wordmark size={24} />
@@ -43,9 +45,13 @@ export function TopBar({
             <Text style={styles.searchText}>⌕  Search places, trips, people</Text>
           </View>
           <Btn solid sm>+ New trip</Btn>
-          <TouchableOpacity onPress={() => router.push('/profile/somchai.travels')}>
-            <Avatar size={34} ring />
-          </TouchableOpacity>
+          {user ? (
+            <TouchableOpacity onPress={() => router.push('/profile/me')}>
+              <Avatar size={34} ring />
+            </TouchableOpacity>
+          ) : (
+            <Btn sm onPress={() => router.push('/sign-in')}>Sign in</Btn>
+          )}
         </>
       )}
     </View>

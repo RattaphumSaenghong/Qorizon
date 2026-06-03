@@ -24,6 +24,8 @@ import { Avatar } from '../../src/components/Avatar';
 import { Btn } from '../../src/components/Btn';
 import { Chip } from '../../src/components/Chip';
 import { MapView, MapPin } from '../../src/components/MapView';
+import { useAuthStore } from '../../src/stores/authStore';
+import { signOut } from '../../src/lib/auth';
 
 // ── Mock profile data ────────────────────────────────────────
 const PROFILE = {
@@ -69,13 +71,8 @@ const TRAVEL_PINS = [
 type Tab = 'Posts' | 'Trips' | 'Map';
 
 // ── Bio header ───────────────────────────────────────────────
-function ProfileHeader({ onFollow }: { onFollow: () => void }) {
+function ProfileHeader({ isOwn, onSignOut }: { isOwn: boolean; onSignOut: () => void }) {
   const [following, setFollowing] = useState(false);
-
-  const handleFollow = () => {
-    setFollowing((f) => !f);
-    onFollow();
-  };
 
   return (
     <View style={styles.header}>
@@ -89,14 +86,17 @@ function ProfileHeader({ onFollow }: { onFollow: () => void }) {
             <Text style={styles.handle}>{PROFILE.handle}</Text>
           </View>
           <View style={styles.headerActions}>
-            {PROFILE.isOwn ? (
-              <Btn sm>Edit profile</Btn>
+            {isOwn ? (
+              <>
+                <Btn sm>Edit profile</Btn>
+                <Btn sm onPress={onSignOut}>Sign out</Btn>
+              </>
             ) : (
               <>
                 <Btn
                   solid={!following}
                   sm
-                  onPress={handleFollow}
+                  onPress={() => setFollowing((f) => !f)}
                   style={following ? styles.followingBtn : undefined}
                 >
                   {following ? 'Following' : 'Follow'}
@@ -327,7 +327,16 @@ function TravelMap() {
 export default function ProfileScreen() {
   const router = useRouter();
   const { username } = useLocalSearchParams<{ username: string }>();
+  const user = useAuthStore((s) => s.user);
   const [activeTab, setActiveTab] = useState<Tab>('Posts');
+
+  // 'me' route, or viewing your own handle, = own profile
+  const isOwn = username === 'me' && !!user;
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.replace('/(tabs)/');
+  };
 
   return (
     <View style={styles.root}>
@@ -343,7 +352,7 @@ export default function ProfileScreen() {
       <View style={styles.body}>
         {/* Left column: bio + tabs + content */}
         <View style={styles.leftCol}>
-          <ProfileHeader onFollow={() => {}} />
+          <ProfileHeader isOwn={isOwn} onSignOut={handleSignOut} />
           <TabBar active={activeTab} onChange={setActiveTab} />
 
           <View style={styles.tabContent}>

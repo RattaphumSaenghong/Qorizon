@@ -34,6 +34,17 @@ const memoryAdapter: StorageAdapter = {
   removeItem: (key) => { delete memoryStore[key]; },
 };
 
+// Web: localStorage so the session survives page refresh. Falls back to
+// the in-memory store during SSR / when localStorage is unavailable.
+const webAdapter: StorageAdapter =
+  typeof window !== 'undefined' && window.localStorage
+    ? {
+        getItem: (key) => window.localStorage.getItem(key),
+        setItem: (key, value) => window.localStorage.setItem(key, value),
+        removeItem: (key) => window.localStorage.removeItem(key),
+      }
+    : memoryAdapter;
+
 export function initSupabase() {
   const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
   const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -47,13 +58,13 @@ export function initSupabase() {
     return createSupabaseClient(
       url ?? 'https://placeholder.supabase.co',
       key ?? 'placeholder-key',
-      Platform.OS === 'web' ? memoryAdapter : secureStoreAdapter,
+      Platform.OS === 'web' ? webAdapter : secureStoreAdapter,
     );
   }
 
   return createSupabaseClient(
     url,
     key,
-    Platform.OS === 'web' ? memoryAdapter : secureStoreAdapter,
+    Platform.OS === 'web' ? webAdapter : secureStoreAdapter,
   );
 }
