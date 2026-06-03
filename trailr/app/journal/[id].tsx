@@ -9,10 +9,12 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
+  ActivityIndicator,
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
 import { colors, spacing, fontSize } from '../../src/theme/tokens';
 import { Wordmark } from '../../src/components/Wordmark';
 import { Avatar } from '../../src/components/Avatar';
@@ -20,7 +22,81 @@ import { Chip } from '../../src/components/Chip';
 import { Btn } from '../../src/components/Btn';
 import { MapView, MapPin } from '../../src/components/MapView';
 import { ForkModal } from '../../src/components/ForkModal';
-import { getTripById, Moment, Day } from '../../src/data/mockTrips';
+import { getSupabaseClient } from '@trailr/db';
+import { Trip, Moment, Day } from '../../src/data/mockTrips';
+
+// ── Date helpers ─────────────────────────────────────────────
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtShort(d: string | null): string {
+  if (!d) return '';
+  const dt = new Date(d);
+  return `${MONTHS[dt.getMonth()]} ${dt.getDate()}`;
+}
+function fmtMonthYear(d: string | null): string {
+  if (!d) return '';
+  const dt = new Date(d);
+  return `${MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
+}
+
+// ── Fetch + assemble a trip from the DB into the Trip shape ───
+async function fetchJournal(tripId: string): Promise<Trip | null> {
+  const db = getSupabaseClient() as any;
+
+  const { data: t, error } = await db
+    .from('trips')
+    .select(`*, author:users!trips_user_id_fkey(username,display_name)`)
+    .eq('id', tripId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!t) return null;
+
+  const { data: dayRows } = await db
+    .from('trip_days').select('*').eq('trip_id', tripId).order('day_number');
+  const { data: stopRows } = await db
+    .from('stops').select('*').eq('trip_id', tripId).eq('status', 'visited').order('sort_order');
+
+  const allStops = stopRows ?? [];
+
+  const days: Day[] = (dayRows ?? []).map((d: any) => ({
+    n: d.day_number,
+    place: d.place ?? '',
+    date: fmtShort(d.date),
+    moments: allStops
+      .filter((s: any) => s.day_id === d.id)
+      .map((s: any, i: number): Moment => ({
+        time: s.planned_time ?? '',
+        location: s.location_name ?? '',
+        caption: s.caption ?? '',
+        latitude: s.latitude ?? 0,
+        longitude: s.longitude ?? 0,
+        hasVideo: false,
+        hasAudio: false,
+        photoHeight: [200, 170, 150][i % 3],
+      })),
+  }));
+
+  const likeCount = allStops.reduce((sum: number, s: any) => sum + (s.like_count ?? 0), 0);
+  const center = allStops[0] ?? { latitude: 13.75, longitude: 100.5 };
+
+  return {
+    id: t.id,
+    title: t.title,
+    author: t.author?.display_name ?? t.author?.username ?? '',
+    authorHandle: '@' + (t.author?.username ?? 'unknown'),
+    duration: `${days.length} days`,
+    photoCount: allStops.length,
+    audioCount: 0,
+    forkCount: t.fork_count ?? 0,
+    likeCount,
+    coverLocation: allStops[0]?.location_name ?? t.title,
+    startDate: fmtMonthYear(t.start_date),
+    centerLat: center.latitude,
+    centerLon: center.longitude,
+    centerZoom: 5,
+    days,
+    forkedFrom: undefined,
+  };
+}
 
 const DAY_PINS: Array<{ x: `${number}%`; y: `${number}%` }> = [
   { x: '28%', y: '62%' },
@@ -82,7 +158,13 @@ function DayHeader({ day }: { day: Day }) {
 export default function JournalScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const trip = getTripById(id ?? '');
+
+  const { data: trip, isLoading, error } = useQuery({
+    queryKey: ['journal', id],
+    queryFn: () => fetchJournal(id!),
+    enabled: !!id,
+  });
+  if (error) console.error('[Journal] query error:', error);
 
   const [activeTab, setActiveTab] = useState('Journal');
   const [currentDay, setCurrentDay] = useState(1);
@@ -115,10 +197,19 @@ export default function JournalScreen() {
     router.push(`/builder/${id}?mode=${mode}`);
   };
 
+  if (isLoading) {
+    return (
+      <View style={styles.notFound}>
+        <ActivityIndicator color={colors.acc} size="large" />
+      </View>
+    );
+  }
+
   if (!trip) {
     return (
       <View style={styles.notFound}>
-        <Text>Trip not found</Text>
+        <Text style={{ color: colors.sub }}>Trip not found</Text>
+        <Btn sm onPress={() => router.back()}>Go back</Btn>
       </View>
     );
   }
@@ -220,7 +311,7 @@ export default function JournalScreen() {
         {/* ── Right: sticky map ── */}
         <View style={styles.mapCol}>
           <View style={styles.mapWrapper}>
-          <MapView initialLongitude={137.5} initialLatitude={36.0} initialZoom={5}>
+          <MapView initialLongitude={trip.centerLon} initialLatitude={trip.centerLat} initialZoom={trip.centerZoom}>
             {trip.days.map((day, i) => (
               <MapPin
                 key={day.n}
@@ -289,7 +380,7 @@ export default function JournalScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.paper, flexDirection: 'column' },
-  notFound: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  notFound: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 },
 
   header: {
     flexDirection: 'row',

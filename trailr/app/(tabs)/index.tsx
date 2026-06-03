@@ -124,11 +124,14 @@ export default function FeedScreen() {
   const [activeFilter, setActiveFilter] = useState('Following');
 
   // Fetch following feed if signed in, else public stops
-  const { data: stops = [], isLoading } = useQuery({
+  const { data: stops = [], isLoading, error } = useQuery({
     queryKey: user ? ['feed', 'following', user.id] : ['feed', 'public'],
     queryFn: () => user ? fetchFollowingFeedStops(user.id) : fetchPublicStops(),
     staleTime: 1000 * 30,
+    retry: 1,
   });
+
+  if (error) console.error('[Feed] query error:', error);
 
   // Map pins from live stops
   const pins = stops
@@ -167,11 +170,21 @@ export default function FeedScreen() {
           {isLoading || authLoading ? (
             <View style={styles.center}>
               <ActivityIndicator color={colors.acc} size="large" />
+              <Text style={[styles.emptyText, { marginTop: 12 }]}>Loading from Supabase…</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.center}>
+              <Text style={[styles.emptyText, { color: 'red' }]}>
+                DB error — check console
+              </Text>
+              <Text style={[styles.emptyText, { fontSize: 11, marginTop: 8 }]}>
+                {String(error)}
+              </Text>
             </View>
           ) : stops.length === 0 ? (
             <View style={styles.center}>
               <Text style={styles.emptyText}>
-                {user ? 'Follow someone to see their trips here.' : 'No trips yet.'}
+                {user ? 'Follow someone to see their trips here.' : 'Seed not run yet — 0 stops in DB.'}
               </Text>
             </View>
           ) : (
