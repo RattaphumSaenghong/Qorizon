@@ -11,7 +11,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Pressable,
-  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -20,51 +19,23 @@ import { TopBar } from '../../src/components/TopBar';
 import { MapView } from '../../src/components/MapView';
 import { Chip } from '../../src/components/Chip';
 import { Avatar } from '../../src/components/Avatar';
+import { CoverImage } from '../../src/components/CoverImage';
+import { CommentsModal } from '../../src/components/CommentsModal';
+import { MapSheet } from '../../src/components/MapSheet';
+import { FeedCardSkeleton } from '../../src/components/Skeleton';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import { useAuthStore } from '../../src/stores/authStore';
-import { getSupabaseClient } from '@trailr/db';
-import type { FeedStop, StopWithMedia } from '@trailr/db';
+import { fetchFeedStops, fetchPublicStops, useToggleSave, useToggleLike, stopKeys } from '@trailr/db';
+import { useToast } from '../../src/components/Toast';
+import { PressableScale } from '../../src/components/PressableScale';
+import { Btn } from '../../src/components/Btn';
 
-const FILTERS = ['Following', 'Nearby', 'For you'];
+const FILTERS = ['Following', 'Nearby', 'For you', 'On-map'];
 
-// ── Fetch functions ──────────────────────────────────────────
-async function fetchFollowingFeedStops(userId: string): Promise<FeedStop[]> {
-  const db = getSupabaseClient() as any;
-
-  const { data: follows } = await db
-    .from('follows').select('following_id').eq('follower_id', userId);
-  const ids = (follows ?? []).map((f: any) => f.following_id as string);
-  if (ids.length === 0) return [];
-
-  const { data, error } = await db
-    .from('stops')
-    .select(`*, media(*), author:users!stops_user_id_fkey(id,username,display_name,avatar_url), trip:trips!stops_trip_id_fkey(id,title,cover_image_url)`)
-    .eq('status', 'visited')
-    .in('user_id', ids)
-    .order('captured_at', { ascending: false })
-    .limit(30);
-  if (error) throw error;
-
-  const stopIds = (data ?? []).map((s: any) => s.id as string);
-  const { data: likes } = await db.from('likes').select('stop_id').eq('user_id', userId).in('stop_id', stopIds);
-  const likedSet = new Set((likes ?? []).map((l: any) => l.stop_id));
-
-  return (data ?? []).map((s: any) => ({ ...s, is_liked: likedSet.has(s.id), is_saved: false }));
-}
-
-async function fetchPublicStops(): Promise<StopWithMedia[]> {
-  const db = getSupabaseClient() as any;
-  const { data, error } = await db
-    .from('stops')
-    .select(`*, media(*), author:users!stops_user_id_fkey(id,username,display_name,avatar_url), trip:trips!stops_trip_id_fkey(id,title,cover_image_url)`)
-    .eq('status', 'visited')
-    .order('captured_at', { ascending: false })
-    .limit(30);
-  if (error) throw error;
-  return data ?? [];
-}
+// Feed query functions now live in @trailr/db (REST API client).
 
 // ── Feed card ────────────────────────────────────────────────
-function FeedCard({ stop, onPress }: { stop: any; onPress: () => void }) {
+function FeedCard({ stop, onPress, onToggleLike, onToggleSave, onOpenComments }: { stop: any; onPress: () => void; onToggleLike: () => void; onToggleSave: () => void; onOpenComments: () => void }) {
   const [pressed, setPressed] = useState(false);
 
   return (
@@ -75,7 +46,7 @@ function FeedCard({ stop, onPress }: { stop: any; onPress: () => void }) {
       style={[styles.card, pressed && styles.cardPressed]}
     >
       <View style={styles.cardHeader}>
-        <Avatar size={38} ring />
+        <Avatar size={38} ring imageUri={stop.author?.avatar_url} />
         <View style={styles.cardUserInfo}>
           <Text style={styles.cardHandle}>
             @{stop.author?.username ?? 'unknown'}
@@ -87,7 +58,11 @@ function FeedCard({ stop, onPress }: { stop: any; onPress: () => void }) {
       </View>
 
       <View style={styles.cardPhoto}>
-        <Text style={styles.photoLabel}>[ photo ]</Text>
+        <CoverImage
+          uri={stop.media?.[0]?.cdn_url ?? stop.media?.[0]?.url}
+          style={styles.cardPhotoImg}
+          labelStyle={styles.photoLabel}
+        />
         {stop.trip && (
           <View style={styles.tripBadge}>
             <Text style={styles.tripBadgeText}>✈ {stop.trip.title}</Text>
@@ -96,12 +71,19 @@ function FeedCard({ stop, onPress }: { stop: any; onPress: () => void }) {
       </View>
 
       <View style={styles.cardActions}>
-        <Text style={[styles.actionIcon, stop.is_liked && styles.likedIcon]}>♡</Text>
-        <Text style={styles.actionCount}>{stop.like_count ?? 0}</Text>
-        <Text style={styles.actionIcon}>▢</Text>
-        <Text style={styles.actionIcon}>↗</Text>
+        <PressableScale onPress={onToggleLike} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel={stop.is_liked ? 'Unlike' : 'Like'}>
+          <Text style={[styles.actionIcon, stop.is_liked && styles.likedIcon]}>{stop.is_liked ? '♥' : '♡'}</Text>
+          <Text style={styles.actionCount}>{stop.like_count ?? 0}</Text>
+        </PressableScale>
+        <PressableScale onPress={onToggleSave} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel={stop.is_saved ? 'Remove from saved' : 'Save'}>
+          <Text style={[styles.actionIcon, stop.is_saved && styles.likedIcon]}>
+            {stop.is_saved ? '🔖' : '▢'}
+          </Text>
+        </PressableScale>
         <View style={{ flex: 1 }} />
-        <Text style={styles.actionCount}>{stop.comment_count ?? 0} comments</Text>
+        <PressableScale onPress={onOpenComments} accessibilityRole="button" accessibilityLabel="Comments">
+          <Text style={styles.actionCount}>{stop.comment_count ?? 0} comments</Text>
+        </PressableScale>
       </View>
 
       <View style={styles.cardCaption}>
@@ -122,11 +104,32 @@ export default function FeedScreen() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuthStore();
   const [activeFilter, setActiveFilter] = useState('Following');
+  const toggleSave = useToggleSave();
+  const toggleLike = useToggleLike(user?.id ?? '');
+  const toast = useToast();
+  const [commentsStop, setCommentsStop] = useState<string | null>(null);
+  const { isPhone } = useResponsive();
+  // Visible map bounds → drives the "On-map" filter.
+  const [mapBounds, setMapBounds] = useState<
+    { west: number; south: number; east: number; north: number } | null
+  >(null);
 
-  // Fetch following feed if signed in, else public stops
-  const { data: stops = [], isLoading, error } = useQuery({
-    queryKey: user ? ['feed', 'following', user.id] : ['feed', 'public'],
-    queryFn: () => user ? fetchFollowingFeedStops(user.id) : fetchPublicStops(),
+  const onToggleSave = (stop: any) => {
+    if (!user) { router.push('/sign-in'); return; }
+    toggleSave.mutate({ stop_id: stop.id });
+    toast(stop.is_saved ? 'Removed from saved' : 'Saved');
+  };
+
+  const onToggleLike = (stopId: string) => {
+    if (!user) { router.push('/sign-in'); return; }
+    toggleLike.mutate(stopId);
+  };
+
+  // Fetch following feed if signed in, else public stops.
+  // Signed-in key matches stopKeys.feed so useToggleLike's optimistic update lands here.
+  const { data: stops = [], isLoading, error, refetch } = useQuery({
+    queryKey: user ? stopKeys.feed(user.id) : ['feed', 'public'],
+    queryFn: () => user ? fetchFeedStops(user.id) : fetchPublicStops(),
     staleTime: 1000 * 30,
     retry: 1,
   });
@@ -146,6 +149,95 @@ export default function FeedScreen() {
       onPress: () => router.push(`/journal/${s.trip?.id ?? s.trip_id}`),
     }));
 
+  // "On-map": only posts whose location falls inside the current map viewport.
+  const onMap = activeFilter === 'On-map';
+  const displayedStops =
+    onMap && mapBounds
+      ? stops.filter(
+          (s: any) =>
+            s.latitude != null &&
+            s.longitude != null &&
+            s.longitude >= mapBounds.west &&
+            s.longitude <= mapBounds.east &&
+            s.latitude >= mapBounds.south &&
+            s.latitude <= mapBounds.north,
+        )
+      : stops;
+
+  const feedInner = (
+    <>
+      <View style={styles.filters}>
+        {FILTERS.map((f) => (
+          <PressableScale key={f} onPress={() => setActiveFilter(f)}>
+            <Chip dot={false} accent={f === activeFilter}>{f}</Chip>
+          </PressableScale>
+        ))}
+      </View>
+
+      {isLoading || authLoading ? (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.feedScroll, isPhone && styles.feedScrollPhone]}
+        >
+          {[0, 1, 2].map((i) => (
+            <FeedCardSkeleton key={i} />
+          ))}
+        </ScrollView>
+      ) : error ? (
+        <View style={styles.center}>
+          <Text style={styles.emptyText}>Couldn't load your feed.</Text>
+          <Text style={[styles.emptyText, { fontSize: fontSize.sm, marginTop: 6, marginBottom: spacing.lg }]}>
+            Check your connection and try again.
+          </Text>
+          <Btn sm onPress={() => refetch()}>Retry</Btn>
+        </View>
+      ) : displayedStops.length === 0 ? (
+        <View style={styles.center}>
+          <Text style={styles.emptyText}>
+            {onMap
+              ? 'No posts in this part of the map — pan or zoom out.'
+              : user
+                ? 'Follow someone to see their trips here.'
+                : 'Seed not run yet — 0 stops in DB.'}
+          </Text>
+        </View>
+      ) : (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.feedScroll, isPhone && styles.feedScrollPhone]}
+        >
+          {displayedStops.map((stop: any) => (
+            <FeedCard
+              key={stop.id}
+              stop={stop}
+              onToggleLike={() => onToggleLike(stop.id)}
+              onToggleSave={() => onToggleSave(stop)}
+              onOpenComments={() => setCommentsStop(stop.id)}
+              onPress={() => router.push(`/journal/${stop.trip?.id ?? stop.trip_id}`)}
+            />
+          ))}
+        </ScrollView>
+      )}
+    </>
+  );
+
+  const mapBlock = (
+    <MapView
+      initialLongitude={136.0}
+      initialLatitude={30.0}
+      initialZoom={4}
+      posts={pins}
+      onBoundsChange={setMapBounds}
+    >
+      <View style={styles.liveBadge} pointerEvents={'none'}>
+        <View style={styles.liveDot} />
+        <Text style={styles.liveBadgeText}>
+          {onMap ? `${displayedStops.length} in view` : `${pins.length} stops on map`}
+        </Text>
+      </View>
+    </MapView>
+  );
+
   return (
     <View style={styles.root}>
       <TopBar
@@ -156,70 +248,23 @@ export default function FeedScreen() {
           if (tab === 'Saved') router.push('/(tabs)/saved');
         }}
       />
-      <View style={styles.body}>
-        {/* ── Left: feed ── */}
-        <View style={styles.feedCol}>
-          <View style={styles.filters}>
-            {FILTERS.map((f) => (
-              <TouchableOpacity key={f} onPress={() => setActiveFilter(f)}>
-                <Chip dot={false} accent={f === activeFilter}>{f}</Chip>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {isLoading || authLoading ? (
-            <View style={styles.center}>
-              <ActivityIndicator color={colors.acc} size="large" />
-              <Text style={[styles.emptyText, { marginTop: 12 }]}>Loading from Supabase…</Text>
-            </View>
-          ) : error ? (
-            <View style={styles.center}>
-              <Text style={[styles.emptyText, { color: 'red' }]}>
-                DB error — check console
-              </Text>
-              <Text style={[styles.emptyText, { fontSize: 11, marginTop: 8 }]}>
-                {String(error)}
-              </Text>
-            </View>
-          ) : stops.length === 0 ? (
-            <View style={styles.center}>
-              <Text style={styles.emptyText}>
-                {user ? 'Follow someone to see their trips here.' : 'Seed not run yet — 0 stops in DB.'}
-              </Text>
-            </View>
-          ) : (
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.feedScroll}
-            >
-              {stops.map((stop: any) => (
-                <FeedCard
-                  key={stop.id}
-                  stop={stop}
-                  onPress={() => router.push(`/journal/${stop.trip?.id ?? stop.trip_id}`)}
-                />
-              ))}
-            </ScrollView>
-          )}
+      {isPhone ? (
+        <View style={styles.phoneBody}>
+          <View style={styles.feedColPhone}>{feedInner}</View>
+          <MapSheet title={`🗺  Map · ${pins.length} stops`}>{mapBlock}</MapSheet>
         </View>
-
-        {/* ── Right: live interactive map ── */}
-        <View style={styles.mapCol}>
-          <MapView
-            initialLongitude={136.0}
-            initialLatitude={30.0}
-            initialZoom={4}
-            posts={pins}
-          >
-            <View style={styles.liveBadge} pointerEvents={'none'}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveBadgeText}>
-                {pins.length} stops on map
-              </Text>
-            </View>
-          </MapView>
+      ) : (
+        <View style={styles.body}>
+          <View style={styles.feedCol}>{feedInner}</View>
+          <View style={styles.mapCol}>{mapBlock}</View>
         </View>
-      </View>
+      )}
+
+      <CommentsModal
+        stopId={commentsStop}
+        visible={!!commentsStop}
+        onClose={() => setCommentsStop(null)}
+      />
     </View>
   );
 }
@@ -233,6 +278,10 @@ const styles = StyleSheet.create({
     borderRightColor: colors.line,
     flexShrink: 0,
   },
+  // phone: feed fills the width; the map lives in a MapSheet over it
+  phoneBody: { flex: 1 },
+  feedColPhone: { flex: 1 },
+  feedScrollPhone: { paddingBottom: 200 }, // clear the collapsed map sheet + tab bar
   filters: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -272,6 +321,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   photoLabel: { fontSize: fontSize.sm, color: colors.sub, fontFamily: 'monospace' },
+  cardPhotoImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   tripBadge: {
     position: 'absolute',
     bottom: 8,
@@ -292,6 +342,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     paddingBottom: spacing.sm,
   },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   actionIcon: { fontSize: 20, color: colors.ink },
   likedIcon: { color: colors.acc },
   actionCount: { fontSize: fontSize.sm, color: colors.sub },

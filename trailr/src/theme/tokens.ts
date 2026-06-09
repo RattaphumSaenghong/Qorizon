@@ -40,5 +40,32 @@ export const fontSize = {
   xxl: 30,
 };
 
+/** Animation timings (ms) and the shared spring config for press feedback. */
+export const motion = {
+  fast: 120,
+  base: 200,
+  slow: 320,
+  /** Animated.spring config for tap/press scale. */
+  press: { speed: 40, bounciness: 0 },
+};
+
+/** Elevation presets — keep shadows consistent instead of hand-rolling each time. */
+export const shadow = {
+  sm: {
+    shadowColor: '#2c2a26',
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  md: {
+    shadowColor: '#2c2a26',
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+};
+
 export const TOP_BAR_H = 58;
 export const RAIL_W = 64;

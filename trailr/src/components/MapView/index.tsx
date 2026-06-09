@@ -23,6 +23,7 @@ interface PostPin {
   location: string;
   caption: string;
   hasVideo?: boolean;
+  photoUrl?: string;
   onPress?: () => void;
 }
 
@@ -34,6 +35,18 @@ interface MapViewProps {
   posts?: PostPin[];
   /** Trail coordinates — used by interactive web map */
   trail?: [number, number][];
+  /** Planned stop-connector line — used by interactive web map */
+  route?: [number, number][];
+  /** Highlighted pin id — used by interactive web map; ignored by static fallback */
+  activeId?: string | null;
+  /** Pin select callback — used by interactive web map; ignored by static fallback */
+  onSelectPost?: (id: string) => void;
+  /** Visible-bounds callback — used by interactive web map; ignored by static fallback */
+  onBoundsChange?: (b: { west: number; south: number; east: number; north: number }) => void;
+  /** Recenter target — used by interactive web map; ignored by static fallback */
+  center?: { latitude: number; longitude: number } | null;
+  /** Tap-to-place callback — used by interactive web map; ignored by static fallback */
+  onMapPress?: (coord: { latitude: number; longitude: number }) => void;
   style?: object;
   children?: React.ReactNode;
 }

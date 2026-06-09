@@ -1,7 +1,6 @@
 /**
- * Database types for Trailr — match supabase/migrations/*.sql (the unified
- * `stops` model). When a real project exists, regenerate with:
- *   npx supabase gen types typescript --local > src/types/database.ts
+ * Database/API types for Trailr — the shapes the NestJS REST API returns
+ * (the unified `stops` model). Hand-maintained to mirror api/prisma/schema.prisma.
  */
 
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
@@ -16,7 +15,7 @@ export const SKIM_EXCLUDED_CATEGORIES: StopCategory[] = ['hotel', 'flight', 'tra
 export type ForkMode = 'full' | 'skim';
 export type MediaType = 'photo' | 'video' | 'audio';
 export type BookingType = 'flight' | 'hotel';
-export type BookingProvider = 'amadeus' | 'agoda' | 'booking_com';
+export type BookingProvider = 'amadeus' | 'agoda' | 'booking_com' | 'mock';
 export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 export type NotificationType = 'live_batch' | 'follow' | 'like' | 'comment';
 export type UserLanguage = 'th' | 'en';
@@ -29,10 +28,38 @@ export interface UserRow {
   display_name: string | null;
   avatar_url: string | null;
   bio: string | null;
+  real_name: string | null;
+  phone: string | null; // only present for yourself or trip co-members
   language: UserLanguage;
   follower_count: number;
   following_count: number;
   created_at: string;
+}
+
+// ── Trip members / invites ───────────────────────────────────
+export type MemberStatus = 'pending' | 'accepted' | 'declined';
+
+export interface TripMemberItem {
+  id: string;
+  trip_id: string;
+  user_id: string;
+  role: string;
+  status: MemberStatus;
+  user: {
+    id: string;
+    username: string;
+    display_name: string | null;
+    avatar_url: string | null;
+    real_name: string | null;
+  };
+}
+
+export interface TripInviteItem {
+  id: string;
+  trip_id: string;
+  status: MemberStatus;
+  trip: { id: string; title: string; destination: string | null; cover_image_url: string | null };
+  inviter: { id: string; username: string; display_name: string | null; avatar_url: string | null } | null;
 }
 
 export interface AlbumOverrides {
@@ -48,6 +75,10 @@ export interface TripRow {
   description: string | null;
   cover_image_url: string | null;
   status: TripStatus;
+  stage: 'planning' | 'living' | 'album';
+  destination: string | null;
+  budget: number | null;
+  budget_currency: string;
   live_mode: boolean;
   live_cadence: LiveCadence;
   visibility: TripVisibility;
@@ -89,6 +120,7 @@ export interface StopRow {
   caption: string | null;
   captured_at: string | null;
   batch_date: string | null;
+  feed_eligible: boolean;
   like_count: number;
   comment_count: number;
   created_at: string;
@@ -170,8 +202,42 @@ export interface BookingRow {
   status: BookingStatus;
   amount_thb: number | null;
   commission_thb: number | null;
-  raw_payload: Json | null;
+  title: string | null; // surfaced from raw_payload for display
   created_at: string;
+}
+
+/** A bookable offer from a provider search (not persisted until booked). */
+export interface BookingOffer {
+  id: string;
+  type: BookingType;
+  provider: BookingProvider;
+  title: string;
+  subtitle: string;
+  amount_thb: number;
+  latitude?: number;
+  longitude?: number;
+  meta?: Record<string, unknown>;
+}
+
+export interface SearchBookingRequest {
+  type: BookingType;
+  trip_id?: string;
+  origin?: string;
+  destination?: string;
+  depart_date?: string;
+  city?: string;
+  check_in?: string;
+  nights?: number;
+}
+
+export interface CreateBookingRequest {
+  type: BookingType;
+  provider: BookingProvider;
+  trip_id?: string;
+  external_ref?: string;
+  amount_thb: number;
+  title?: string;
+  meta?: Record<string, unknown>;
 }
 
 export interface NotificationRow {
@@ -192,7 +258,7 @@ export interface NotificationRow {
 export type InsertTrip = Omit<TripRow, 'id' | 'created_at' | 'updated_at' | 'fork_count'> & { id?: string };
 export type InsertTripDay = Omit<TripDayRow, 'id'> & { id?: string };
 export type InsertStop =
-  Omit<StopRow, 'id' | 'created_at' | 'updated_at' | 'like_count' | 'comment_count' | 'category' | 'status' | 'sort_order'>
+  Omit<StopRow, 'id' | 'created_at' | 'updated_at' | 'like_count' | 'comment_count' | 'feed_eligible' | 'category' | 'status' | 'sort_order'>
   & { id?: string; category?: StopCategory; status?: StopStatus; sort_order?: number };
 export type InsertMedia = Omit<MediaRow, 'id' | 'created_at'> & { id?: string };
 export type InsertComment = Omit<CommentRow, 'id' | 'created_at'> & { id?: string };
@@ -218,4 +284,68 @@ export interface FeedStop extends StopWithMedia {
   trip: Pick<TripRow, 'id' | 'title' | 'cover_image_url'>;
   is_liked: boolean;
   is_saved: boolean;
+}
+
+/** A bookmarked stop or trip (exactly one is set). */
+export interface SavedItem {
+  id: string;
+  created_at: string;
+  stop: StopWithMedia | null;
+  trip: TripWithAuthor | null;
+}
+
+export interface CommentItem {
+  id: string;
+  stop_id: string;
+  content: string;
+  created_at: string;
+  author: AuthorLite;
+}
+
+// ── Album (derived view of a trip's visited media) ───────────
+
+export interface AlbumItem {
+  media_id: string;
+  stop_id: string;
+  type: MediaType;
+  url: string;
+  cdn_url: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  captured_at: string | null;
+  location_name: string | null;
+  caption: string | null;
+  excluded: boolean;
+}
+
+export interface Album {
+  trip: Pick<TripRow, 'id' | 'title' | 'cover_image_url' | 'user_id'>;
+  author: AuthorLite;
+  items: AlbumItem[];
+  count: number;
+}
+
+/** Edits layered over the album (also the PATCH body). */
+export type UpdateAlbum = AlbumOverrides;
+
+// ── Live trail ───────────────────────────────────────────────
+
+export interface TrailPointInput {
+  latitude: number;
+  longitude: number;
+  altitude?: number;
+  recorded_at?: string;
+}
+
+// ── Notifications (enriched read shape) ──────────────────────
+
+export interface NotificationItem {
+  id: string;
+  type: NotificationType;
+  read: boolean;
+  created_at: string;
+  actor: AuthorLite | null;
+  trip: { id: string; title: string } | null;
+  stop_id: string | null;
+  batch_id: string | null;
 }

@@ -1,20 +1,34 @@
 import React from 'react';
-import { TouchableOpacity, Text, StyleSheet } from 'react-native';
+import { Text, StyleSheet, ActivityIndicator, View } from 'react-native';
 import { colors, spacing, radius, fontSize } from '../theme/tokens';
+import { PressableScale } from './PressableScale';
 
 interface Props {
   children: React.ReactNode;
   solid?: boolean;
   sm?: boolean;
   full?: boolean;
+  disabled?: boolean;
+  loading?: boolean;
   onPress?: () => void;
   style?: object;
 }
 
-export function Btn({ children, solid = false, sm = false, full = false, onPress, style }: Props) {
+export function Btn({
+  children,
+  solid = false,
+  sm = false,
+  full = false,
+  disabled = false,
+  loading = false,
+  onPress,
+  style,
+}: Props) {
+  const isDisabled = disabled || loading;
   return (
-    <TouchableOpacity
-      onPress={onPress}
+    <PressableScale
+      onPress={isDisabled ? undefined : onPress}
+      disabled={isDisabled}
       style={[
         styles.base,
         solid ? styles.solid : styles.outline,
@@ -22,12 +36,24 @@ export function Btn({ children, solid = false, sm = false, full = false, onPress
         full && styles.full,
         style,
       ]}
-      activeOpacity={0.75}
     >
-      <Text style={[styles.text, solid ? styles.textSolid : styles.textOutline, sm && styles.textSm]}>
+      {/* Keep the label mounted under the spinner so the button keeps its width. */}
+      <Text
+        style={[
+          styles.text,
+          solid ? styles.textSolid : styles.textOutline,
+          sm && styles.textSm,
+          loading && styles.textHidden,
+        ]}
+      >
         {children}
       </Text>
-    </TouchableOpacity>
+      {loading && (
+        <View style={styles.spinner} pointerEvents="none">
+          <ActivityIndicator size="small" color={solid ? colors.white : colors.ink} />
+        </View>
+      )}
+    </PressableScale>
   );
 }
 
@@ -70,5 +96,17 @@ const styles = StyleSheet.create({
   },
   textSm: {
     fontSize: fontSize.sm,
+  },
+  textHidden: {
+    opacity: 0,
+  },
+  spinner: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -1,155 +1,65 @@
-import { getSupabaseClient } from '../client';
-import type { TripWithAuthor, InsertTrip, TripRow, ForkMode } from '../types';
-
-// NOTE: Supabase query builder types require generated types from `supabase gen types`.
-// Until a real project exists, we use `any` casts at the DB boundary only.
-// All return types and hook types remain fully typed via our own interfaces.
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { request } from '../http';
+import type { TripWithAuthor, InsertTrip, TripRow, TripDayRow, ForkMode } from '../types';
 
 /** Fetch a single trip by ID, joined with its author. */
 export async function fetchTrip(tripId: string): Promise<TripWithAuthor> {
-  const db = getSupabaseClient() as any;
-  const { data, error } = await db
-    .from('trips')
-    .select(`
-      *,
-      author:users!trips_user_id_fkey (
-        id, username, display_name, avatar_url
-      )
-    `)
-    .eq('id', tripId)
-    .single();
-
-  if (error) throw error;
-  return data as TripWithAuthor;
+  return request<TripWithAuthor>('GET', `/trips/${tripId}`);
 }
 
-/** Fetch all public trips for a user's profile. */
+/** Fetch the trips on a user's profile. */
 export async function fetchUserTrips(userId: string): Promise<TripWithAuthor[]> {
-  const db = getSupabaseClient() as any;
-  const { data, error } = await db
-    .from('trips')
-    .select(`
-      *,
-      author:users!trips_user_id_fkey (
-        id, username, display_name, avatar_url
-      )
-    `)
-    .eq('user_id', userId)
-    .in('visibility', ['public', 'followers'])
-    .order('created_at', { ascending: false });
-
-  if (error) throw error;
-  return (data ?? []) as TripWithAuthor[];
+  return request<TripWithAuthor[]>('GET', `/users/${userId}/trips`);
 }
 
-/** Fetch trips from users that the current user follows (home feed). */
-export async function fetchFollowingFeed(userId: string, limit = 20): Promise<TripWithAuthor[]> {
-  const db = getSupabaseClient() as any;
-
-  // Step 1: get IDs of people we follow
-  const { data: follows, error: followError } = await db
-    .from('follows')
-    .select('following_id')
-    .eq('follower_id', userId);
-
-  if (followError) throw followError;
-
-  const followingIds = (follows ?? []).map((f: any) => f.following_id as string);
-  if (followingIds.length === 0) return [];
-
-  // Step 2: fetch their trips
-  const { data, error } = await db
-    .from('trips')
-    .select(`
-      *,
-      author:users!trips_user_id_fkey (
-        id, username, display_name, avatar_url
-      )
-    `)
-    .in('user_id', followingIds)
-    .in('visibility', ['public', 'followers'])
-    .order('updated_at', { ascending: false })
-    .limit(limit);
-
-  if (error) throw error;
-  return (data ?? []) as TripWithAuthor[];
+/** Trips from people the current user follows (home feed). userId is implicit (token). */
+export async function fetchFollowingFeed(_userId: string, limit = 20): Promise<TripWithAuthor[]> {
+  return request<TripWithAuthor[]>('GET', `/feed/trips?limit=${limit}`);
 }
 
-/** Create a new trip. */
+/** Create a new trip. The server sets the owner from the auth token. */
 export async function createTrip(trip: InsertTrip): Promise<TripRow> {
-  const db = getSupabaseClient() as any;
-  const { data, error } = await db
-    .from('trips')
-    .insert(trip)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  const {
+    title, description, cover_image_url, status, stage, destination, budget, budget_currency,
+    live_mode, live_cadence, visibility, start_date, end_date,
+  } = trip as Partial<TripRow>;
+  return request<TripRow>('POST', '/trips', {
+    title,
+    description,
+    cover_image_url,
+    status,
+    stage,
+    destination,
+    budget,
+    budget_currency,
+    live_mode,
+    live_cadence,
+    visibility,
+    start_date,
+    end_date,
+  });
 }
 
 /**
- * Fork a trip via the `fork_trip` SQL function.
- * Server-side: copies the plan (trip + days + stops reset to 'planned'),
- * strips story data, bumps source fork_count — atomically.
- *
- * mode 'full' → copies every stop.
- * mode 'skim' → drops logistics (hotel/flight/transport) + empty days;
- *               keeps the spots, food & activities.
- *
- * Owner is forced to the authenticated user server-side; newUserId is a
- * fallback for service-role/seed contexts only.
+ * Fork a trip. Server copies the plan (stops reset to 'planned', story stripped),
+ * applies skim/full, bumps fork_count — atomically. Owner = authenticated user.
  */
 export async function forkTrip(
   sourceTripId: string,
   mode: ForkMode = 'full',
-  newUserId?: string,
+  _newUserId?: string,
 ): Promise<TripRow> {
-  const db = getSupabaseClient() as any;
-
-  const { data: newTripId, error } = await db.rpc('fork_trip', {
-    p_source_trip_id: sourceTripId,
-    p_new_user_id: newUserId ?? null,
-    p_mode: mode,
-  });
-  if (error) throw error;
-
-  const { data: forked, error: fetchError } = await db
-    .from('trips')
-    .select('*')
-    .eq('id', newTripId)
-    .single();
-  if (fetchError) throw fetchError;
-
-  return forked as TripRow;
+  return request<TripRow>('POST', `/trips/${sourceTripId}/fork`, { mode });
 }
 
 /** Fetch a trip's days, ordered. */
-export async function fetchTripDays(tripId: string) {
-  const db = getSupabaseClient() as any;
-  const { data, error } = await db
-    .from('trip_days')
-    .select('*')
-    .eq('trip_id', tripId)
-    .order('day_number', { ascending: true });
-  if (error) throw error;
-  return data ?? [];
+export async function fetchTripDays(tripId: string): Promise<TripDayRow[]> {
+  return request<TripDayRow[]>('GET', `/trips/${tripId}/days`);
 }
 
-/** Update trip metadata (title, visibility, status, etc.) */
+/** Update trip metadata (title, visibility, status, etc.). */
 export async function updateTrip(
   tripId: string,
   updates: Partial<Omit<TripRow, 'id' | 'user_id' | 'created_at'>>,
 ): Promise<TripRow> {
-  const db = getSupabaseClient() as any;
-  const { data, error } = await db
-    .from('trips')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('id', tripId)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  return request<TripRow>('PATCH', `/trips/${tripId}`, updates);
 }

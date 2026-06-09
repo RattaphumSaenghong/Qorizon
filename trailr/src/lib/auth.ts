@@ -1,28 +1,22 @@
 /**
- * Auth helpers — thin wrappers over Supabase Auth for the RN app.
+ * Auth helpers — wrap the Trailr API auth queries and sync the auth store.
  */
-import { getSupabaseClient } from '@trailr/db';
+import { login, signup, logout } from '@trailr/db';
+import { useAuthStore } from '../stores/authStore';
 
 export async function signInWithEmail(email: string, password: string) {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw error;
-  return data;
+  const user = await login(email, password);
+  useAuthStore.getState().setUser(user);
+  return user;
 }
 
 export async function signUpWithEmail(email: string, password: string, fullName?: string) {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { data: { full_name: fullName } },
-  });
-  if (error) throw error;
-  return data;
+  const user = await signup({ email, password, display_name: fullName });
+  useAuthStore.getState().setUser(user);
+  return user;
 }
 
 export async function signOut() {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  await logout();
+  useAuthStore.getState().setUser(null);
 }

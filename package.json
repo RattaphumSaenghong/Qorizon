@@ -2,7 +2,7 @@
   "name": "trailr-workspace",
   "private": true,
   "workspaces": {
-    "packages": ["packages/*", "trailr"],
+    "packages": ["packages/*", "trailr", "api"],
     "nohoist": ["trailr/react-map-gl", "trailr/react-map-gl/**", "trailr/mapbox-gl", "trailr/mapbox-gl/**"]
   }
 }

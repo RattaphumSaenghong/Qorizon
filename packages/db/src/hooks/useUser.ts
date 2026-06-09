@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchUser,
   fetchUserByUsername,
+  fetchUserPosts,
   checkIsFollowing,
   followUser,
   unfollowUser,
@@ -11,9 +12,20 @@ import {
 export const userKeys = {
   detail: (id: string) => ['users', id] as const,
   byUsername: (username: string) => ['users', 'username', username] as const,
+  posts: (id: string) => ['users', id, 'posts'] as const,
   isFollowing: (currentId: string, targetId: string) =>
     ['users', 'following', currentId, targetId] as const,
 };
+
+/** A user's posts (visited stops) for their profile grid. */
+export function useUserPosts(userId: string) {
+  return useQuery({
+    queryKey: userKeys.posts(userId),
+    queryFn: () => fetchUserPosts(userId),
+    enabled: !!userId,
+    staleTime: 1000 * 60,
+  });
+}
 
 export function useUser(userId: string) {
   return useQuery({

@@ -1,240 +1,208 @@
 /**
- * Trips screen — BuildA: Canva-style trip builder
- * Blocks library | Canvas blueprint | Inspector panel
+ * Trips tab — "My Trips": the signed-in user's trips. Tap to open the builder;
+ * create a new draft. (The deep editor lives at /builder/[id].)
  */
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { colors, spacing, fontSize } from '../../src/theme/tokens';
-import { Wordmark } from '../../src/components/Wordmark';
-import { Chip } from '../../src/components/Chip';
+import { useUserTrips, useMyTripInvites, useRespondInvite } from '@trailr/db';
+import type { TripWithAuthor } from '@trailr/db';
+import { colors, spacing, fontSize, radius } from '../../src/theme/tokens';
+import { TopBar } from '../../src/components/TopBar';
 import { Btn } from '../../src/components/Btn';
-import { Avatar } from '../../src/components/Avatar';
+import { useAuthStore } from '../../src/stores/authStore';
+import { useToast } from '../../src/components/Toast';
 
-const BLOCKS = [
-  { g: '◷', label: 'Day' },
-  { g: '⚲', label: 'Place' },
-  { g: '✈', label: 'Flight' },
-  { g: '⌂', label: 'Hotel' },
-  { g: '✎', label: 'Note' },
-  { g: '▦', label: 'Photo' },
-  { g: '฿', label: 'Budget' },
-];
-
-function BlockChip({ g, label }: { g: string; label: string }) {
+function TripCard({ trip, onOpen }: { trip: TripWithAuthor; onOpen: () => void }) {
+  const statusColor =
+    trip.status === 'active' ? colors.acc : trip.status === 'draft' ? colors.sub : colors.line;
+  const statusLabel =
+    trip.status === 'active' ? '● LIVE' : trip.status === 'draft' ? 'Draft' : 'Completed';
   return (
-    <TouchableOpacity style={styles.blockChip} activeOpacity={0.75}>
-      <View style={styles.blockIcon}>
-        <Text style={styles.blockGlyph}>{g}</Text>
+    <TouchableOpacity style={styles.card} onPress={onOpen} activeOpacity={0.88}>
+      <View style={styles.cover}>
+        {trip.cover_image_url ? (
+          <Image source={{ uri: trip.cover_image_url }} style={styles.coverImg} resizeMode="cover" />
+        ) : (
+          <Text style={styles.coverLabel}>[ cover ]</Text>
+        )}
+        {trip.live_mode && (
+          <View style={styles.livePill}>
+            <View style={styles.liveDot} />
+            <Text style={styles.liveText}>LIVE</Text>
+          </View>
+        )}
       </View>
-      <Text style={styles.blockLabel}>{label}</Text>
-      <View style={styles.blockSpacer} />
-      <Text style={styles.dragHandle}>⠿</Text>
+      <View style={styles.meta}>
+        <Text style={styles.title} numberOfLines={1}>{trip.title}</Text>
+        <View style={styles.footer}>
+          <Text style={[styles.status, { color: statusColor }]}>{statusLabel}</Text>
+          {trip.fork_count > 0 && <Text style={styles.forks}>⑂ {trip.fork_count}</Text>}
+        </View>
+      </View>
     </TouchableOpacity>
-  );
-}
-
-function StopCard() {
-  return (
-    <View style={styles.stopCard}>
-      <View style={styles.stopPhoto}>
-        <Text style={styles.stopPhotoLabel}>[ place ]</Text>
-      </View>
-      <View style={styles.stopMeta}>
-        <View style={[styles.bar, { width: '70%' }]} />
-        <Chip dot accent style={styles.stopTime}>9:00 · 1.5 hrs</Chip>
-        <View style={[styles.bar, { width: '90%' }]} />
-      </View>
-    </View>
   );
 }
 
 export default function TripsScreen() {
   const router = useRouter();
+  const user = useAuthStore((s) => s.user);
+  const { data: trips = [], isLoading } = useUserTrips(user?.id ?? '');
+
+  // Open a trip in the screen that matches its stage.
+  const openTrip = (t: { id: string; stage?: string }) => {
+    const path =
+      t.stage === 'album' ? `/album/${t.id}` : t.stage === 'living' ? `/journal/${t.id}` : `/builder/${t.id}`;
+    router.push(path);
+  };
+
+  const toast = useToast();
+  const { data: invites = [] } = useMyTripInvites();
+  const respond = useRespondInvite();
+
+  const goTab = (tab: string) => {
+    if (tab === 'Feed') router.push('/(tabs)/');
+    if (tab === 'Explore') router.push('/(tabs)/explore');
+    if (tab === 'Saved') router.push('/(tabs)/saved');
+  };
 
   return (
     <View style={styles.root}>
-      {/* Editor toolbar */}
-      <View style={styles.toolbar}>
-        <Wordmark size={22} />
-        <TouchableOpacity onPress={() => router.push('/(tabs)/')}>
-          <Text style={styles.back}>‹ back</Text>
-        </TouchableOpacity>
-        <View style={styles.tripTitlePlaceholder} />
-        <View style={styles.spacer} />
-        <Chip dot={false}>Auto-saved</Chip>
-        <Btn sm>Preview</Btn>
-        <Btn solid sm>Publish trip</Btn>
-        <Avatar size={34} ring />
+      <TopBar active="Trips" onTabPress={goTab} />
+
+      <View style={styles.header}>
+        <Text style={styles.heading}>My Trips</Text>
+        <View style={{ flex: 1 }} />
+        {user && (
+          <Btn solid sm onPress={() => router.push('/new-trip')}>＋ New trip</Btn>
+        )}
       </View>
 
-      <View style={styles.body}>
-        {/* ── Left: block library ── */}
-        <View style={styles.blocksPanel}>
-          <Text style={styles.panelLabel}>DRAG BLOCKS IN</Text>
-          {BLOCKS.map((b) => (
-            <BlockChip key={b.label} g={b.g} label={b.label} />
+      {user && invites.length > 0 && (
+        <View style={styles.invites}>
+          <Text style={styles.invitesTitle}>Trip invites</Text>
+          {invites.map((inv) => (
+            <View key={inv.id} style={styles.inviteRow}>
+              <Text style={styles.inviteText} numberOfLines={1}>
+                <Text style={styles.inviteWho}>{inv.inviter?.display_name ?? inv.inviter?.username ?? 'Someone'}</Text>
+                {' invited you to '}
+                <Text style={styles.inviteWho}>{inv.trip.destination ?? inv.trip.title}</Text>
+              </Text>
+              <Btn sm onPress={() => respond.mutate({ tripId: inv.trip_id, status: 'declined' })}>Decline</Btn>
+              <Btn
+                solid
+                sm
+                onPress={() =>
+                  respond.mutate(
+                    { tripId: inv.trip_id, status: 'accepted' },
+                    { onSuccess: () => toast('Joined the trip!') },
+                  )
+                }
+              >
+                Accept
+              </Btn>
+            </View>
           ))}
         </View>
+      )}
 
-        {/* ── Center: canvas ── */}
-        <ScrollView style={styles.canvas} contentContainerStyle={styles.canvasContent}>
-          <View style={styles.dayHeader}>
-            <View style={styles.dayCircle}>
-              <Text style={styles.dayNum}>3</Text>
-            </View>
-            <Text style={styles.dayTitle}>Day 3 — Kyoto</Text>
-          </View>
-          <StopCard />
-          <StopCard />
-          {/* drop zone */}
-          <View style={styles.dropZone}>
-            <Text style={styles.dropZoneText}>+ drop a place, note or flight here</Text>
-          </View>
-        </ScrollView>
-
-        {/* ── Right: inspector ── */}
-        <View style={styles.inspector}>
-          <Text style={styles.panelLabel}>SELECTED BLOCK</Text>
-          <View style={styles.inspectorPhoto}>
-            <Text style={styles.stopPhotoLabel}>[ cover photo ]</Text>
-          </View>
-          <View style={[styles.bar, { width: '60%' }]} />
-          <View style={styles.inspectorTimes}>
-            <Chip dot={false}>Start 9:00</Chip>
-            <Chip dot={false}>1.5 hrs</Chip>
-          </View>
-          <View style={styles.notes}>
-            <View style={styles.bar} />
-            <View style={styles.bar} />
-            <View style={[styles.bar, { width: '50%' }]} />
-          </View>
-          <Btn full sm>＋ Add to booking</Btn>
+      {!user ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>Sign in to see and build your trips.</Text>
+          <Btn sm onPress={() => router.push('/sign-in')}>Sign in</Btn>
         </View>
-      </View>
+      ) : isLoading ? (
+        <View style={styles.empty}>
+          <ActivityIndicator color={colors.acc} size="large" />
+        </View>
+      ) : trips.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>No trips yet. Create one or fork a trip you like.</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.grid}>
+          {trips.map((t) => (
+            <TripCard key={t.id} trip={t} onOpen={() => openTrip(t)} />
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.paper },
-  toolbar: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.lg,
     gap: spacing.md,
-    paddingHorizontal: spacing.xl,
-    height: 54,
     borderBottomWidth: 1,
     borderBottomColor: colors.line,
-    flexShrink: 0,
   },
-  back: { color: colors.sub, fontSize: fontSize.md },
-  tripTitlePlaceholder: { height: 10, width: 220, backgroundColor: colors.bar, borderRadius: 5 },
-  spacer: { flex: 1 },
-  body: { flex: 1, flexDirection: 'row' },
-
-  blocksPanel: {
-    width: 210,
-    borderRightWidth: 1,
-    borderRightColor: colors.line,
-    backgroundColor: colors.panel,
-    padding: spacing.md,
-    gap: spacing.sm + 2,
-  },
-  panelLabel: { fontSize: fontSize.xs, color: colors.sub, fontFamily: 'monospace', letterSpacing: 0.5 },
-  blockChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-    padding: 9,
-    backgroundColor: colors.paper,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  blockIcon: {
-    width: 26,
-    height: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
+  heading: { fontSize: fontSize.xl, fontWeight: '800', color: colors.ink },
+  invites: {
     backgroundColor: colors.accSoft,
-    borderWidth: 1.5,
-    borderColor: colors.acc,
-    borderRadius: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
   },
-  blockGlyph: { fontSize: 14 },
-  blockLabel: { fontSize: fontSize.md, color: colors.ink, flex: 1 },
-  blockSpacer: { flex: 1 },
-  dragHandle: { color: colors.sub, fontSize: 14 },
-
-  canvas: { flex: 1 },
-  canvasContent: {
-    padding: spacing.xxl,
-    gap: spacing.md,
-    maxWidth: 560,
-  },
-  dayHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, marginBottom: 4 },
-  dayCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.acc,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dayNum: { color: colors.white, fontSize: fontSize.base, fontWeight: '700' },
-  dayTitle: { fontSize: 22 },
-
-  stopCard: {
+  invitesTitle: { fontSize: fontSize.sm, fontWeight: '700', color: colors.acc, textTransform: 'uppercase', letterSpacing: 0.5 },
+  inviteRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  inviteText: { flex: 1, fontSize: fontSize.md, color: colors.ink },
+  inviteWho: { fontWeight: '700' },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.xxl },
+  emptyText: { fontSize: fontSize.md, color: colors.sub, textAlign: 'center' },
+  grid: {
     flexDirection: 'row',
-    gap: 12,
-    padding: spacing.md,
-    backgroundColor: colors.paper,
-    borderRadius: 10,
+    flexWrap: 'wrap',
+    gap: spacing.lg,
+    padding: spacing.xxl,
+  },
+  card: {
+    width: 260,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.line,
-  },
-  stopPhoto: {
-    width: 84,
-    height: 84,
-    backgroundColor: colors.panel,
-    borderRadius: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stopPhotoLabel: { fontSize: fontSize.xs, color: colors.sub, fontFamily: 'monospace' },
-  stopMeta: { flex: 1, justifyContent: 'center', gap: 7 },
-  stopTime: { alignSelf: 'flex-start' },
-  bar: { height: 9, backgroundColor: colors.bar, borderRadius: 5 },
-
-  dropZone: {
-    height: 60,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    borderStyle: 'dashed',
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dropZoneText: { fontSize: fontSize.md, color: colors.sub },
-
-  inspector: {
-    width: 280,
-    borderLeftWidth: 1,
-    borderLeftColor: colors.line,
-    backgroundColor: colors.panel,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  inspectorPhoto: {
-    height: 130,
     backgroundColor: colors.paper,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.line,
+    overflow: 'hidden',
+  },
+  cover: {
+    height: 150,
+    backgroundColor: colors.panel,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  inspectorTimes: { flexDirection: 'row', gap: spacing.sm },
-  notes: { gap: 8 },
+  coverImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  coverLabel: { fontSize: fontSize.xs, color: colors.sub, fontFamily: 'monospace' },
+  livePill: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.acc,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+  },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.white },
+  liveText: { fontSize: fontSize.xs, color: colors.white, fontWeight: '700' },
+  meta: { padding: spacing.md, gap: spacing.sm },
+  title: { fontSize: fontSize.base, fontWeight: '700', color: colors.ink },
+  footer: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  status: { fontSize: fontSize.sm, fontWeight: '600' },
+  forks: { fontSize: fontSize.sm, color: colors.sub },
 });

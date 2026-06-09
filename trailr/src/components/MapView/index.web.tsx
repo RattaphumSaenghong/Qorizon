@@ -20,6 +20,7 @@ export interface PostPin {
   location: string;
   caption: string;
   hasVideo?: boolean;
+  photoUrl?: string;
   onPress?: () => void;
 }
 
@@ -28,8 +29,20 @@ interface MapViewProps {
   initialLatitude?: number;
   initialZoom?: number;
   posts?: PostPin[];
-  /** GeoJSON trail line coordinates [[lon, lat], ...] */
+  /** Recorded GPS trail [[lon, lat], ...] — drawn as a solid line. */
   trail?: [number, number][];
+  /** Planned stop-to-stop connector [[lon, lat], ...] — drawn as a dashed line. */
+  route?: [number, number][];
+  /** Highlighted pin id — rendered enlarged with its photo, and panned to. */
+  activeId?: string | null;
+  /** When provided, clicking a pin selects it (id) instead of opening a popup. */
+  onSelectPost?: (id: string) => void;
+  /** Fires with the visible map bounds on load and after every pan/zoom. */
+  onBoundsChange?: (b: { west: number; south: number; east: number; north: number }) => void;
+  /** Recenter target — the map eases here whenever this changes (after mount). */
+  center?: { latitude: number; longitude: number } | null;
+  /** Fires with the coordinate when the user taps the map (builder: drop a stop). */
+  onMapPress?: (coord: { latitude: number; longitude: number }) => void;
   style?: object;
   children?: React.ReactNode;
 }
@@ -50,12 +63,28 @@ export function MapView({
   initialZoom = 11,
   posts = [],
   trail = [],
+  route = [],
+  activeId = null,
+  onSelectPost,
+  onBoundsChange,
+  center = null,
+  onMapPress,
   style,
   children,
 }: MapViewProps) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef([]);
+  const mapboxglRef = useRef(null);
+  const loadedRef = useRef(false);
+  const resizeObsRef = useRef(null);
+  // Keep latest posts reachable from the one-time map-load handler & popup callback.
+  const postsRef = useRef(posts);
+  postsRef.current = posts;
+  const onBoundsChangeRef = useRef(onBoundsChange);
+  onBoundsChangeRef.current = onBoundsChange;
+  const onMapPressRef = useRef(onMapPress);
+  onMapPressRef.current = onMapPress;
 
   const buildPopupHtml = (post: PostPin) => `
     <div style="
@@ -110,12 +139,137 @@ export function MapView({
     </div>
   `;
 
+  // Render markers for the *current* posts. Safe to call repeatedly — it
+  // clears existing markers first. No-ops until the map has loaded.
+  const syncMarkers = useCallback(() => {
+    const map = mapRef.current;
+    const mapboxgl = mapboxglRef.current;
+    if (!map || !mapboxgl || !loadedRef.current) return;
+
+    markersRef.current.forEach((m) => m.remove());
+    markersRef.current = [];
+
+    posts.forEach((post) => {
+      const isActive = post.id === activeId;
+
+      // Outer element is positioned by Mapbox (it writes a translate transform
+      // here) — never set our own transform on it, or the pin jumps to 0,0.
+      const el = document.createElement('div');
+      el.style.cursor = 'pointer';
+      el.title = post.location;
+      el.style.zIndex = isActive ? '20' : '1';
+
+      // Inner visual carries the hover scale, so it doesn't clobber positioning.
+      const size = isActive ? 60 : 40;
+      const inner = document.createElement('div');
+      inner.style.cssText = `
+        width: ${size}px; height: ${size}px; border-radius: 50%;
+        background: #fbf9f5;
+        border: ${isActive ? 4 : 3}px solid #e07a5f;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 2px 8px rgba(0,0,0,${isActive ? 0.35 : 0.2});
+        transition: transform 0.15s ease;
+        overflow: hidden;
+        font-size: 18px;
+      `;
+      // Active pin shows its photo; others show the 📍 glyph.
+      if (isActive && post.photoUrl) {
+        inner.style.backgroundImage = `url('${post.photoUrl}')`;
+        inner.style.backgroundSize = 'cover';
+        inner.style.backgroundPosition = 'center';
+      } else {
+        inner.innerHTML = '📍';
+      }
+      el.appendChild(inner);
+
+      el.addEventListener('mouseenter', () => {
+        inner.style.transform = 'scale(1.15)';
+        if (!isActive) el.style.zIndex = '10';
+      });
+      el.addEventListener('mouseleave', () => {
+        inner.style.transform = 'scale(1)';
+        if (!isActive) el.style.zIndex = '1';
+      });
+
+      const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([post.longitude, post.latitude])
+        .addTo(map);
+
+      // Selection mode (journal) vs. popup mode (feed).
+      if (onSelectPost) {
+        el.addEventListener('click', () => onSelectPost(post.id));
+      } else {
+        const popup = new mapboxgl.Popup({
+          closeButton: false,
+          offset: 28,
+          maxWidth: '240px',
+        }).setHTML(buildPopupHtml(post));
+        marker.setPopup(popup);
+        el.addEventListener('click', () => marker.togglePopup());
+      }
+      markersRef.current.push(marker);
+    });
+
+    // Keep the highlighted pin in view.
+    if (activeId) {
+      const active = posts.find((p) => p.id === activeId);
+      if (active) map.easeTo({ center: [active.longitude, active.latitude], duration: 500 });
+    }
+  }, [posts, activeId, onSelectPost]);
+
+  // Latest syncMarkers, callable from the one-time map-load handler.
+  const syncRef = useRef(null);
+  syncRef.current = syncMarkers;
+
+  // Draw/update line layers. Idempotent: updates the source if it exists, else
+  // creates source + layer. Reactive so async-arriving trail data still renders.
+  const syncLines = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) return;
+
+    const lines: Array<{ id: string; coords: [number, number][]; dashed: boolean }> = [
+      { id: 'trail', coords: trail, dashed: false }, // recorded GPS path
+      { id: 'route', coords: route, dashed: true },  // planned stop connector
+    ];
+
+    for (const { id, coords, dashed } of lines) {
+      const data = {
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: coords },
+        properties: {},
+      };
+      const src = map.getSource(id);
+      if (src) {
+        src.setData(coords.length >= 2 ? data : { type: 'FeatureCollection', features: [] });
+        continue;
+      }
+      if (coords.length < 2) continue;
+      map.addSource(id, { type: 'geojson', data });
+      map.addLayer({
+        id: `${id}-line`,
+        type: 'line',
+        source: id,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': '#e07a5f',
+          'line-width': dashed ? 2 : 3.5,
+          'line-opacity': dashed ? 0.55 : 0.95,
+          ...(dashed ? { 'line-dasharray': [1.5, 2.5] } : {}),
+        },
+      });
+    }
+  }, [trail, route]);
+
+  const syncLinesRef = useRef(null);
+  syncLinesRef.current = syncLines;
+
+  // Create the map exactly once.
   useEffect(() => {
     injectCss();
 
-    // Register global callback for popup button
+    // Popup "View full trip" button → latest posts via ref.
     window.__trailrOpenPost = (postId: string) => {
-      const post = posts.find((p) => p.id === postId);
+      const post = postsRef.current.find((p) => p.id === postId);
       post?.onPress?.();
     };
 
@@ -123,6 +277,7 @@ export function MapView({
     import('mapbox-gl').then(({ default: mapboxgl }) => {
       if (!containerRef.current || mapRef.current) return;
 
+      mapboxglRef.current = mapboxgl;
       mapboxgl.accessToken = TOKEN;
 
       const map = new mapboxgl.Map({
@@ -135,86 +290,69 @@ export function MapView({
 
       mapRef.current = map;
 
-      // Navigation controls
       map.addControl(
         new mapboxgl.NavigationControl({ showCompass: false }),
         'bottom-right',
       );
 
+      // Resize the GL canvas when the container changes size (collapse split,
+      // sheet drag, window resize). mapbox's own trackResize misses flex/width
+      // changes, leaving the map rendered at its old width with blank space.
+      if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+        const ro = new ResizeObserver(() => mapRef.current && mapRef.current.resize());
+        ro.observe(containerRef.current);
+        resizeObsRef.current = ro;
+      }
+
+      // Report the visible bounds (for the "On-map" feed filter) on load + pan/zoom.
+      const emitBounds = () => {
+        const cb = onBoundsChangeRef.current;
+        if (!cb || !mapRef.current) return;
+        const b = mapRef.current.getBounds();
+        cb({ west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() });
+      };
+      map.on('moveend', emitBounds);
+
+      // Tap-to-place (builder).
+      map.on('click', (e: any) => {
+        onMapPressRef.current?.({ latitude: e.lngLat.lat, longitude: e.lngLat.lng });
+      });
+
       map.on('load', () => {
-        // ── Trail line ─────────────────────────────────────────
-        if (trail.length >= 2) {
-          map.addSource('trail', {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              geometry: { type: 'LineString', coordinates: trail },
-              properties: {},
-            },
-          });
-          map.addLayer({
-            id: 'trail-line',
-            type: 'line',
-            source: 'trail',
-            paint: {
-              'line-color': '#e07a5f',
-              'line-width': 3,
-              'line-dasharray': [2, 3],
-              'line-opacity': 0.9,
-            },
-          });
-        }
-
-        // ── Post pins ──────────────────────────────────────────
-        posts.forEach((post) => {
-          // Custom circular pin element
-          const el = document.createElement('div');
-          el.style.cssText = `
-            width: 44px; height: 44px; border-radius: 50%;
-            background: #fbf9f5;
-            border: 3px solid #e07a5f;
-            display: flex; align-items: center; justify-content: center;
-            cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-            transition: transform 0.15s ease;
-            overflow: hidden;
-            font-size: 18px;
-          `;
-          el.innerHTML = '📍';
-          el.title = post.location;
-
-          el.addEventListener('mouseenter', () => {
-            el.style.transform = 'scale(1.15)';
-            el.style.zIndex = '10';
-          });
-          el.addEventListener('mouseleave', () => {
-            el.style.transform = 'scale(1)';
-            el.style.zIndex = '1';
-          });
-
-          const popup = new mapboxgl.Popup({
-            closeButton: false,
-            offset: 28,
-            maxWidth: '240px',
-          }).setHTML(buildPopupHtml(post));
-
-          const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-            .setLngLat([post.longitude, post.latitude])
-            .setPopup(popup)
-            .addTo(map);
-
-          el.addEventListener('click', () => marker.togglePopup());
-          markersRef.current.push(marker);
-        });
+        loadedRef.current = true;
+        syncLinesRef.current?.(); // trail + route lines
+        syncRef.current?.();      // post pins
+        emitBounds();             // initial viewport
       });
     });
 
     return () => {
+      resizeObsRef.current?.disconnect();
+      resizeObsRef.current = null;
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
+      loadedRef.current = false;
       mapRef.current?.remove();
       mapRef.current = null;
     };
   }, []);
+
+  // Re-render markers whenever posts change — data usually arrives AFTER the
+  // map has initialised, which is why one-time rendering left the map empty.
+  useEffect(() => {
+    syncMarkers();
+  }, [syncMarkers]);
+
+  // Same for line layers (recorded trail + planned route).
+  useEffect(() => {
+    syncLines();
+  }, [syncLines]);
+
+  // Pan to a new center when it changes (e.g. selecting a post on Explore).
+  useEffect(() => {
+    if (!center || !mapRef.current || !loadedRef.current) return;
+    mapRef.current.easeTo({ center: [center.longitude, center.latitude], duration: 500 });
+  }, [center?.latitude, center?.longitude]);
 
   return (
     <View style={[styles.container, style]}>

@@ -1,0 +1,75 @@
+import {
+  IsBoolean,
+  IsDateString,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
+import {
+  LIVE_CADENCE,
+  TRIP_STATUS,
+  TRIP_VISIBILITY,
+  type LiveCadence,
+  type TripStatus,
+  type TripVisibility,
+} from '@trailr/shared';
+
+export class CreateTripDto {
+  @IsString()
+  @MaxLength(160)
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  cover_image_url?: string;
+
+  @IsOptional()
+  @IsIn(TRIP_STATUS)
+  status?: TripStatus;
+
+  @IsOptional()
+  @IsIn(['planning', 'living', 'album'])
+  stage?: 'planning' | 'living' | 'album';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  destination?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  budget?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(8)
+  budget_currency?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  live_mode?: boolean;
+
+  @IsOptional()
+  @IsIn(LIVE_CADENCE)
+  live_cadence?: LiveCadence;
+
+  @IsOptional()
+  @IsIn(TRIP_VISIBILITY)
+  visibility?: TripVisibility;
+
+  @IsOptional()
+  @IsDateString()
+  start_date?: string;
+
+  @IsOptional()
+  @IsDateString()
+  end_date?: string;
+}

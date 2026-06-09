@@ -1,4 +1,5 @@
 export interface Moment {
+  id?: string; // owning stop id — links a card to its map pin
   time: string;
   location: string;
   caption: string;
@@ -8,6 +9,7 @@ export interface Moment {
   audioLabel?: string;
   hasVideo?: boolean;
   photoHeight: number;
+  photoUrl?: string;
 }
 
 export interface Day {
@@ -19,9 +21,11 @@ export interface Day {
 
 export interface Trip {
   id: string;
+  ownerId?: string; // trip owner's user id — gates owner-only actions
   title: string;
   author: string;
   authorHandle: string;
+  authorAvatar?: string;
   duration: string;
   photoCount: number;
   audioCount: number;

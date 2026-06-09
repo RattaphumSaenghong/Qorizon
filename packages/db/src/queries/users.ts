@@ -1,68 +1,43 @@
-import { getSupabaseClient } from '../client';
-import type { UserRow } from '../types';
+import { request } from '../http';
+import type { StopWithMedia, UserRow } from '../types';
 
 /** Fetch a user profile by ID. */
 export async function fetchUser(userId: string): Promise<UserRow> {
-  const db = getSupabaseClient() as any;
-  const { data, error } = await db
-    .from('users')
-    .select('*')
-    .eq('id', userId)
-    .single();
+  return request<UserRow>('GET', `/users/${userId}`);
+}
 
-  if (error) throw error;
-  return data;
+/** A user's posts (visited stops) for their profile grid. */
+export async function fetchUserPosts(userId: string): Promise<StopWithMedia[]> {
+  return request<StopWithMedia[]>('GET', `/users/${userId}/posts`);
+}
+
+/** Users that `userId` follows (trip-invite picker). */
+export async function fetchFollowing(userId: string): Promise<UserRow[]> {
+  return request<UserRow[]>('GET', `/users/${userId}/following`);
 }
 
 /** Fetch a user profile by username (for profile pages). */
 export async function fetchUserByUsername(username: string): Promise<UserRow> {
-  const db = getSupabaseClient() as any;
-  const { data, error } = await db
-    .from('users')
-    .select('*')
-    .eq('username', username)
-    .single();
-
-  if (error) throw error;
-  return data;
+  return request<UserRow>('GET', `/users/by-username/${username}`);
 }
 
-/** Check if currentUser follows targetUser. */
+/** Check if the current user follows targetUser. */
 export async function checkIsFollowing(
-  currentUserId: string,
+  _currentUserId: string,
   targetUserId: string,
 ): Promise<boolean> {
-  const db = getSupabaseClient() as any;
-  const { data } = await db
-    .from('follows')
-    .select('follower_id')
-    .eq('follower_id', currentUserId)
-    .eq('following_id', targetUserId)
-    .maybeSingle();
-
-  return !!data;
+  const res = await request<{ is_following: boolean }>('GET', `/users/${targetUserId}/is-following`);
+  return res.is_following;
 }
 
-/** Follow a user. */
-export async function followUser(followerId: string, followingId: string): Promise<void> {
-  const db = getSupabaseClient() as any;
-  const { error } = await db
-    .from('follows')
-    .insert({ follower_id: followerId, following_id: followingId });
-
-  if (error) throw error;
+/** Follow a user (follower = authenticated user). */
+export async function followUser(_followerId: string, followingId: string): Promise<void> {
+  await request<void>('POST', `/users/${followingId}/follow`);
 }
 
 /** Unfollow a user. */
-export async function unfollowUser(followerId: string, followingId: string): Promise<void> {
-  const db = getSupabaseClient() as any;
-  const { error } = await db
-    .from('follows')
-    .delete()
-    .eq('follower_id', followerId)
-    .eq('following_id', followingId);
-
-  if (error) throw error;
+export async function unfollowUser(_followerId: string, followingId: string): Promise<void> {
+  await request<void>('DELETE', `/users/${followingId}/follow`);
 }
 
 /** Update a user's profile. */
@@ -70,14 +45,5 @@ export async function updateUser(
   userId: string,
   updates: Partial<Pick<UserRow, 'display_name' | 'bio' | 'avatar_url' | 'language'>>,
 ): Promise<UserRow> {
-  const db = getSupabaseClient() as any;
-  const { data, error } = await db
-    .from('users')
-    .update(updates)
-    .eq('id', userId)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  return request<UserRow>('PATCH', `/users/${userId}`, updates);
 }

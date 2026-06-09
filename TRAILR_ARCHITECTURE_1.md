@@ -152,7 +152,7 @@ posts
   longitude       float8
   place_id        text                     -- Mapbox place ID
   batch_date      date                     -- which Live Mode batch this belongs to
-  like_count      int DEFAULT 0
+  like_count      int ; 0
   comment_count   int DEFAULT 0
   created_at      timestamptz DEFAULT now()
 ```

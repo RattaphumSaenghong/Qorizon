@@ -16,41 +16,31 @@ import {
   StyleSheet,
   TouchableOpacity,
   Pressable,
+  ActivityIndicator,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import {
+  useUserByUsername,
+  useUserTrips,
+  useUserPosts,
+  useIsFollowing,
+  useToggleFollow,
+  useUpdateUser,
+} from '@trailr/db';
+import type { TripWithAuthor, StopWithMedia, UserRow } from '@trailr/db';
 import { colors, spacing, fontSize, radius } from '../../src/theme/tokens';
 import { TopBar } from '../../src/components/TopBar';
 import { Avatar } from '../../src/components/Avatar';
 import { Btn } from '../../src/components/Btn';
 import { Chip } from '../../src/components/Chip';
-import { MapView, MapPin } from '../../src/components/MapView';
+import { CoverImage } from '../../src/components/CoverImage';
+import { MapView } from '../../src/components/MapView';
 import { useAuthStore } from '../../src/stores/authStore';
 import { signOut } from '../../src/lib/auth';
 
-// ── Mock profile data ────────────────────────────────────────
-const PROFILE = {
-  handle: '@somchai.travels',
-  displayName: 'Somchai Rattana',
-  bio: 'Chasing temples, noodles, and mountain roads 🏔️\nBased in Bangkok · 14 countries · 38 cities',
-  postsCount: 142,
-  followersCount: 4210,
-  followingCount: 312,
-  isOwn: false,                 // set true to show "Edit profile"
-};
-
-// Mock posts grid — 3-col
-const POSTS = Array.from({ length: 18 }, (_, i) => ({ id: String(i) }));
-
-// Mock trips — each is both a plan and a story
-const TRIPS = [
-  { id: 'trip-001', title: '7 Days in Japan',       days: 7,  photos: 84, forks: 24, live: false, status: 'completed' as const },
-  { id: 'trip-002', title: 'Chiang Mai Highlands',  days: 5,  photos: 62, forks: 11, live: false, status: 'completed' as const },
-  { id: 'trip-003', title: 'Tokyo Ramen Tour',      days: 4,  photos: 41, forks: 37, live: false, status: 'completed' as const },
-  { id: 'a4',       title: 'Bali Slow Travel',      days: 10, photos: 0,  forks: 0,  live: true,  status: 'active'    as const },
-  { id: 'a5',       title: 'Pai & Mae Hong Son',    days: 3,  photos: 55, forks: 8,  live: false, status: 'draft'     as const },
-];
-
-// Mock travel pins — real coordinates of visited cities
+// Travel pins — placeholder world-map markers (visited-city aggregation is a follow-up)
 const TRAVEL_PINS = [
   { id: 'bkk',  lat: 13.7563,  lon: 100.5018, label: '🇹🇭' },
   { id: 'cmi',  lat: 18.7883,  lon: 98.9817,  label: '🇹🇭' },
@@ -71,35 +61,49 @@ const TRAVEL_PINS = [
 type Tab = 'Posts' | 'Trips' | 'Map';
 
 // ── Bio header ───────────────────────────────────────────────
-function ProfileHeader({ isOwn, onSignOut }: { isOwn: boolean; onSignOut: () => void }) {
-  const [following, setFollowing] = useState(false);
-
+function ProfileHeader({
+  profile,
+  isOwn,
+  onSignOut,
+  isFollowing,
+  onToggleFollow,
+  onEditProfile,
+  postsCount,
+}: {
+  profile: UserRow;
+  isOwn: boolean;
+  onSignOut: () => void;
+  isFollowing: boolean;
+  onToggleFollow: () => void;
+  onEditProfile: () => void;
+  postsCount: number;
+}) {
   return (
     <View style={styles.header}>
-      <Avatar size={88} ring />
+      <Avatar size={88} ring imageUri={profile.avatar_url} />
 
       <View style={styles.headerMeta}>
         {/* name + actions */}
         <View style={styles.nameRow}>
           <View>
-            <Text style={styles.displayName}>{PROFILE.displayName}</Text>
-            <Text style={styles.handle}>{PROFILE.handle}</Text>
+            <Text style={styles.displayName}>{profile.display_name ?? profile.username}</Text>
+            <Text style={styles.handle}>@{profile.username}</Text>
           </View>
           <View style={styles.headerActions}>
             {isOwn ? (
               <>
-                <Btn sm>Edit profile</Btn>
+                <Btn sm onPress={onEditProfile}>Edit profile</Btn>
                 <Btn sm onPress={onSignOut}>Sign out</Btn>
               </>
             ) : (
               <>
                 <Btn
-                  solid={!following}
+                  solid={!isFollowing}
                   sm
-                  onPress={() => setFollowing((f) => !f)}
-                  style={following ? styles.followingBtn : undefined}
+                  onPress={onToggleFollow}
+                  style={isFollowing ? styles.followingBtn : undefined}
                 >
-                  {following ? 'Following' : 'Follow'}
+                  {isFollowing ? 'Following' : 'Follow'}
                 </Btn>
                 <Btn sm>Message</Btn>
               </>
@@ -109,15 +113,15 @@ function ProfileHeader({ isOwn, onSignOut }: { isOwn: boolean; onSignOut: () => 
 
         {/* stats */}
         <View style={styles.stats}>
-          <StatPill value={PROFILE.postsCount} label="posts" />
+          <StatPill value={postsCount} label="posts" />
           <View style={styles.statDivider} />
-          <StatPill value={PROFILE.followersCount.toLocaleString()} label="followers" />
+          <StatPill value={profile.follower_count.toLocaleString()} label="followers" />
           <View style={styles.statDivider} />
-          <StatPill value={PROFILE.followingCount} label="following" />
+          <StatPill value={profile.following_count} label="following" />
         </View>
 
         {/* bio */}
-        <Text style={styles.bio}>{PROFILE.bio}</Text>
+        {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
       </View>
     </View>
   );
@@ -153,33 +157,35 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
 }
 
 // ── Posts grid ───────────────────────────────────────────────
-function PostsGrid({ onPress }: { onPress: (id: string) => void }) {
+function PostsGrid({ posts, onPress }: { posts: StopWithMedia[]; onPress: (tripId: string) => void }) {
+  if (posts.length === 0) {
+    return (
+      <View style={styles.empty}>
+        <Text style={styles.emptyText}>No posts yet.</Text>
+      </View>
+    );
+  }
   return (
     <ScrollView contentContainerStyle={styles.postsGrid}>
-      {POSTS.map((p, i) => (
-        <Pressable
-          key={p.id}
-          style={({ pressed }) => [styles.postCell, pressed && styles.postCellPressed]}
-          onPress={() => onPress(p.id)}
-        >
-          {/* placeholder — will be a CDN image */}
-          <View style={styles.postPhoto}>
-            {i === 0 && <Text style={styles.postPhotoLabel}>[ photo ]</Text>}
-          </View>
-          {/* video indicator on a few */}
-          {i % 5 === 2 && (
-            <View style={styles.videoTag}>
-              <Text style={styles.videoTagText}>▶</Text>
+      {posts.map((p) => {
+        const uri = p.media?.[0]?.cdn_url ?? p.media?.[0]?.url;
+        return (
+          <Pressable
+            key={p.id}
+            style={({ pressed }) => [styles.postCell, pressed && styles.postCellPressed]}
+            onPress={() => onPress(p.trip_id)}
+          >
+            <View style={styles.postPhoto}>
+              <CoverImage uri={uri} style={styles.postPhotoImg} labelStyle={styles.postPhotoLabel} />
             </View>
-          )}
-          {/* multi-photo indicator */}
-          {i % 4 === 1 && (
-            <View style={styles.multiTag}>
-              <Text style={styles.multiTagText}>⊞</Text>
-            </View>
-          )}
-        </Pressable>
-      ))}
+            {p.media && p.media.length > 1 && (
+              <View style={styles.multiTag}>
+                <Text style={styles.multiTagText}>⊞</Text>
+              </View>
+            )}
+          </Pressable>
+        );
+      })}
     </ScrollView>
   );
 }
@@ -191,7 +197,7 @@ function TripCard({
   trip,
   onOpen,
 }: {
-  trip: typeof TRIPS[0];
+  trip: TripWithAuthor;
   onOpen: (id: string, mode: TripMode) => void;
 }) {
   const [mode, setMode] = useState<TripMode>('story');
@@ -206,7 +212,7 @@ function TripCard({
     ? '● LIVE'
     : trip.status === 'draft'
     ? 'Draft'
-    : `${trip.days} days`;
+    : 'completed';
 
   return (
     <TouchableOpacity
@@ -216,10 +222,15 @@ function TripCard({
     >
       {/* cover */}
       <View style={styles.tripCover}>
-        <Text style={styles.tripCoverLabel}>[ cover ]</Text>
+        <CoverImage
+          uri={trip.cover_image_url}
+          style={styles.tripCoverImg}
+          labelStyle={styles.tripCoverLabel}
+          label="cover"
+        />
 
         {/* LIVE badge */}
-        {trip.live && (
+        {trip.live_mode && (
           <View style={styles.livePill}>
             <View style={styles.livePillDot} />
             <Text style={styles.livePillText}>LIVE</Text>
@@ -252,11 +263,8 @@ function TripCard({
         <Text style={styles.tripTitle} numberOfLines={1}>{trip.title}</Text>
         <View style={styles.tripFooter}>
           <Text style={[styles.tripStatus, { color: statusColor }]}>{statusLabel}</Text>
-          {trip.forks > 0 && (
-            <Text style={styles.tripForks}>⑂ {trip.forks}</Text>
-          )}
-          {trip.photos > 0 && (
-            <Text style={styles.tripPhotos}>▦ {trip.photos}</Text>
+          {trip.fork_count > 0 && (
+            <Text style={styles.tripForks}>⑂ {trip.fork_count}</Text>
           )}
         </View>
       </View>
@@ -264,10 +272,17 @@ function TripCard({
   );
 }
 
-function TripsGrid({ onOpen }: { onOpen: (id: string, mode: TripMode) => void }) {
+function TripsGrid({ trips, onOpen }: { trips: TripWithAuthor[]; onOpen: (id: string, mode: TripMode) => void }) {
+  if (trips.length === 0) {
+    return (
+      <View style={styles.empty}>
+        <Text style={styles.emptyText}>No trips yet.</Text>
+      </View>
+    );
+  }
   return (
     <ScrollView contentContainerStyle={styles.tripsGrid}>
-      {TRIPS.map((t) => (
+      {trips.map((t) => (
         <TripCard key={t.id} trip={t} onOpen={onOpen} />
       ))}
     </ScrollView>
@@ -327,40 +342,104 @@ function TravelMap() {
 export default function ProfileScreen() {
   const router = useRouter();
   const { username } = useLocalSearchParams<{ username: string }>();
-  const user = useAuthStore((s) => s.user);
+  const currentUser = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
   const [activeTab, setActiveTab] = useState<Tab>('Posts');
+  const [editOpen, setEditOpen] = useState(false);
+  const [edName, setEdName] = useState('');
+  const [edBio, setEdBio] = useState('');
+  const [edAvatar, setEdAvatar] = useState('');
 
-  // 'me' route, or viewing your own handle, = own profile
-  const isOwn = username === 'me' && !!user;
+  // '/profile/me', or viewing your own handle, = own profile
+  const isOwn = username === 'me' || (!!currentUser && username === currentUser.username);
+
+  // For other people, fetch by username; own profile uses the auth store.
+  const byUsername = useUserByUsername(isOwn ? '' : (username ?? ''));
+  const profile: UserRow | null | undefined = isOwn ? currentUser : byUsername.data;
+
+  const tripsQ = useUserTrips(profile?.id ?? '');
+  const postsQ = useUserPosts(profile?.id ?? '');
+  const followingQ = useIsFollowing(currentUser?.id ?? '', !isOwn && profile ? profile.id : '');
+  const toggleFollow = useToggleFollow(currentUser?.id ?? '');
+  const updateUser = useUpdateUser(profile?.id ?? '');
+
+  const openEdit = () => {
+    if (!profile) return;
+    setEdName(profile.display_name ?? '');
+    setEdBio(profile.bio ?? '');
+    setEdAvatar(profile.avatar_url ?? '');
+    setEditOpen(true);
+  };
+  const saveProfile = () => {
+    updateUser.mutate(
+      {
+        display_name: edName.trim() || undefined,
+        bio: edBio,
+        avatar_url: edAvatar.trim() || undefined,
+      },
+      { onSuccess: (u) => { setUser(u); setEditOpen(false); } },
+    );
+  };
 
   const handleSignOut = async () => {
     await signOut();
     router.replace('/(tabs)/');
   };
+  const handleToggleFollow = () => {
+    if (!currentUser) {
+      router.push('/sign-in');
+      return;
+    }
+    if (!profile) return;
+    toggleFollow.mutate({ targetUserId: profile.id, isFollowing: !!followingQ.data });
+  };
+
+  const goTab = (tab: string) => {
+    if (tab === 'Feed') router.push('/(tabs)/');
+    if (tab === 'Explore') router.push('/(tabs)/explore');
+    if (tab === 'Trips') router.push('/(tabs)/trips');
+  };
+
+  if (!profile) {
+    return (
+      <View style={styles.root}>
+        <TopBar active="Feed" onTabPress={goTab} />
+        <View style={styles.empty}>
+          {isOwn ? (
+            <Text style={styles.emptyText}>Sign in to view your profile.</Text>
+          ) : (
+            <ActivityIndicator color={colors.acc} size="large" />
+          )}
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
-      <TopBar
-        active="Feed"
-        onTabPress={(tab) => {
-          if (tab === 'Feed') router.push('/(tabs)/');
-          if (tab === 'Explore') router.push('/(tabs)/explore');
-          if (tab === 'Trips') router.push('/(tabs)/trips');
-        }}
-      />
+      <TopBar active="Feed" onTabPress={goTab} />
 
       <View style={styles.body}>
         {/* Left column: bio + tabs + content */}
         <View style={styles.leftCol}>
-          <ProfileHeader isOwn={isOwn} onSignOut={handleSignOut} />
+          <ProfileHeader
+            profile={profile}
+            isOwn={isOwn}
+            onSignOut={handleSignOut}
+            isFollowing={!!followingQ.data}
+            onToggleFollow={handleToggleFollow}
+            onEditProfile={openEdit}
+            postsCount={postsQ.data?.length ?? 0}
+          />
           <TabBar active={activeTab} onChange={setActiveTab} />
 
           <View style={styles.tabContent}>
             {activeTab === 'Posts' && (
-              <PostsGrid onPress={(id) => router.push(`/journal/${id}`)} />
+              <PostsGrid posts={postsQ.data ?? []} onPress={(tripId) => router.push(`/journal/${tripId}`)} />
             )}
             {activeTab === 'Trips' && (
               <TripsGrid
+                trips={tripsQ.data ?? []}
                 onOpen={(id, mode) =>
                   mode === 'story'
                     ? router.push(`/journal/${id}`)
@@ -372,6 +451,29 @@ export default function ProfileScreen() {
           </View>
         </View>
       </View>
+
+      {/* Edit profile modal */}
+      <Modal visible={editOpen} transparent animationType="fade" onRequestClose={() => setEditOpen(false)}>
+        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setEditOpen(false)}>
+          <TouchableOpacity style={styles.modalSheet} activeOpacity={1}>
+            <Text style={styles.modalTitle}>Edit profile</Text>
+
+            <Text style={styles.modalLabel}>Display name</Text>
+            <TextInput style={styles.input} value={edName} onChangeText={setEdName} placeholder="Your name" placeholderTextColor={colors.sub} />
+
+            <Text style={styles.modalLabel}>Bio</Text>
+            <TextInput style={[styles.input, styles.inputMulti]} value={edBio} onChangeText={setEdBio} placeholder="A line about you" placeholderTextColor={colors.sub} multiline />
+
+            <Text style={styles.modalLabel}>Avatar URL</Text>
+            <TextInput style={styles.input} value={edAvatar} onChangeText={setEdAvatar} placeholder="https://…" placeholderTextColor={colors.sub} autoCapitalize="none" />
+
+            <View style={styles.modalActions}>
+              <Btn sm onPress={() => setEditOpen(false)}>Cancel</Btn>
+              <Btn solid sm onPress={saveProfile}>{updateUser.isPending ? 'Saving…' : 'Save'}</Btn>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -382,6 +484,14 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.paper, flexDirection: 'column' },
   body: { flex: 1, overflow: 'hidden' },
   leftCol: { flex: 1, flexDirection: 'column' },
+
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(44,42,38,0.5)', alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
+  modalSheet: { width: '100%', maxWidth: 460, backgroundColor: colors.paper, borderRadius: radius.md, padding: spacing.xl, gap: spacing.sm },
+  modalTitle: { fontSize: fontSize.lg, fontWeight: '700', color: colors.ink, marginBottom: spacing.sm },
+  modalLabel: { fontSize: fontSize.sm, color: colors.sub, marginTop: spacing.sm },
+  input: { borderWidth: 1, borderColor: colors.line, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, fontSize: fontSize.md, color: colors.ink, backgroundColor: colors.panel },
+  inputMulti: { minHeight: 64, textAlignVertical: 'top' },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.md, marginTop: spacing.lg },
 
   // ── Header ──
   header: {
@@ -470,6 +580,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   postPhotoLabel: { fontSize: fontSize.xs, color: colors.sub, fontFamily: 'monospace' },
+  postPhotoImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl },
+  emptyText: { fontSize: fontSize.md, color: colors.sub },
   videoTag: {
     position: 'absolute',
     top: 6,
@@ -518,6 +631,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   tripCoverLabel: { fontSize: fontSize.xs, color: colors.sub, fontFamily: 'monospace' },
+  tripCoverImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   livePill: {
     position: 'absolute',
     top: 8,

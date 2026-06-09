@@ -1,18 +1,16 @@
 import { create } from 'zustand';
-import type { User, Session } from '@supabase/supabase-js';
+import type { AuthUser } from '@trailr/db';
 
 interface AuthState {
-  user: User | null;
-  session: Session | null;
+  user: AuthUser | null;
   loading: boolean;
-  setSession: (session: Session | null) => void;
+  setUser: (user: AuthUser | null) => void;
   setLoading: (loading: boolean) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  session: null,
   loading: true,
-  setSession: (session) => set({ session, user: session?.user ?? null }),
+  setUser: (user) => set({ user }),
   setLoading: (loading) => set({ loading }),
 }));

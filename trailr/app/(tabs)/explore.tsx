@@ -2,28 +2,52 @@
  * Explore screen â€” FeedC: masonry photo grid + right context rail
  */
 import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
+import { fetchPublicStops, useToggleSave } from '@trailr/db';
+import type { FeedStop } from '@trailr/db';
 import { colors, spacing, fontSize } from '../../src/theme/tokens';
 import { TopBar } from '../../src/components/TopBar';
 import { Chip } from '../../src/components/Chip';
 import { Avatar } from '../../src/components/Avatar';
 import { Btn } from '../../src/components/Btn';
-import { MapView, MapPin } from '../../src/components/MapView';
+import { CoverImage } from '../../src/components/CoverImage';
+import { MapView } from '../../src/components/MapView';
+import { useAuthStore } from '../../src/stores/authStore';
 
 const CATEGORIES = ['Trending', 'Thailand', 'Japan', 'Food', 'Hidden gems'];
 
-const GRID_ITEMS = [
-  { span: true, label: '[ photo ]' },
-  { label: '' }, { label: '' },
-  { label: '' }, { label: '[ reel ]' },
-  { label: '' }, { label: '' },
-  { label: '' }, { label: '' },
-];
+function matchCategory(stop: FeedStop, cat: string): boolean {
+  if (cat === 'Trending' || cat === 'Hidden gems') return true;
+  if (cat === 'Food') return stop.category === 'food';
+  const hay = `${stop.location_name ?? ''} ${stop.trip?.title ?? ''}`.toLowerCase();
+  return hay.includes(cat.toLowerCase());
+}
+
+function photoUri(stop: FeedStop): string | undefined {
+  return stop.media?.[0]?.cdn_url ?? stop.media?.[0]?.url;
+}
 
 export default function ExploreScreen() {
   const router = useRouter();
   const [activeCategory, setActiveCategory] = useState('Trending');
+  const { data: stops = [], isLoading } = useQuery({
+    queryKey: ['explore', 'discover'],
+    queryFn: () => fetchPublicStops(60),
+    staleTime: 1000 * 60,
+  });
+  const [selected, setSelected] = useState<FeedStop | null>(null);
+  const user = useAuthStore((s) => s.user);
+  const toggleSave = useToggleSave();
+
+  const items = stops.filter((s) => matchCategory(s, activeCategory));
+  const active = selected ?? items[0];
+
+  const onSave = () => {
+    if (!user) { router.push('/sign-in'); return; }
+    if (active) toggleSave.mutate({ stop_id: active.id });
+  };
 
   return (
     <View style={styles.root}>
@@ -36,7 +60,7 @@ export default function ExploreScreen() {
         }}
       />
       <View style={styles.body}>
-        {/* â”€â”€ Center: masonry grid â”€â”€ */}
+        {/* Center: masonry grid */}
         <ScrollView style={styles.gridCol} contentContainerStyle={styles.gridContent}>
           <View style={styles.categories}>
             {CATEGORIES.map((c) => (
@@ -45,47 +69,71 @@ export default function ExploreScreen() {
               </TouchableOpacity>
             ))}
           </View>
-          <View style={styles.grid}>
-            {GRID_ITEMS.map((item, i) => (
-              <TouchableOpacity
-                key={i}
-                style={[styles.gridItem, item.span && styles.gridItemSpan]}
-                activeOpacity={0.8}
-              >
-                <View style={styles.gridPhoto}>
-                  {item.label ? (
-                    <Text style={styles.gridLabel}>{item.label}</Text>
-                  ) : null}
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
+
+          {isLoading ? (
+            <View style={styles.loading}><ActivityIndicator color={colors.acc} size="large" /></View>
+          ) : items.length === 0 ? (
+            <View style={styles.loading}><Text style={styles.gridLabel}>Nothing here yet.</Text></View>
+          ) : (
+            <View style={styles.grid}>
+              {items.map((stop, i) => {
+                const uri = photoUri(stop);
+                return (
+                  <TouchableOpacity
+                    key={stop.id}
+                    style={[styles.gridItem, i % 7 === 0 && styles.gridItemSpan]}
+                    activeOpacity={0.8}
+                    onPress={() => setSelected(stop)}
+                  >
+                    <View style={styles.gridPhoto}>
+                      <CoverImage uri={uri} style={styles.gridPhotoImg} labelStyle={styles.gridLabel} />
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </ScrollView>
 
-        {/* â”€â”€ Right: context rail â”€â”€ */}
+        {/* Right: context rail (selected post) */}
         <View style={styles.rail}>
           <View style={styles.railAuthor}>
             <Avatar size={36} ring />
             <View style={styles.railAuthorMeta}>
-              <View style={[styles.bar, { width: 120 }]} />
-              <View style={[styles.bar, { width: 80, marginTop: 5 }]} />
+              <Text style={styles.railHandle}>@{active?.author?.username ?? '—'}</Text>
+              <Text style={styles.railLoc}>{active?.location_name ?? 'Pick a photo'}</Text>
             </View>
           </View>
           <View style={styles.selectedPhoto}>
-            <Text style={styles.photoLabel}>[ selected post ]</Text>
+            <CoverImage
+              uri={active ? photoUri(active) : undefined}
+              style={styles.selectedPhotoImg}
+              labelStyle={styles.photoLabel}
+              label="selected post"
+            />
           </View>
           <View style={styles.miniMapWrap}>
-            <MapView initialLongitude={100.4888} initialLatitude={13.7457} initialZoom={13} style={{ height: 130 }}>
-              <MapPin x="50%" y="55%" accent size={20} />
-            </MapView>
+            <MapView
+              initialLatitude={active?.latitude ?? 13.7457}
+              initialLongitude={active?.longitude ?? 100.4888}
+              initialZoom={12}
+              center={
+                active && active.latitude != null && active.longitude != null
+                  ? { latitude: active.latitude, longitude: active.longitude }
+                  : null
+              }
+              posts={
+                active && active.latitude != null && active.longitude != null
+                  ? [{ id: active.id, latitude: active.latitude, longitude: active.longitude, location: active.location_name ?? '', caption: active.caption ?? '' }]
+                  : []
+              }
+              style={{ height: 130 }}
+            />
           </View>
-          <Btn solid full sm>Save to a trip</Btn>
-          <Text style={styles.nearByTitle}>More near here</Text>
-          <View style={styles.nearByRow}>
-            {[0, 1, 2].map((i) => (
-              <View key={i} style={styles.nearByThumb} />
-            ))}
-          </View>
+          <Btn full sm onPress={onSave}>{active?.is_saved ? '🔖 Saved' : '🔖 Save'}</Btn>
+          <Btn solid full sm onPress={() => active && router.push(`/journal/${active.trip?.id ?? active.trip_id}`)}>
+            View trip
+          </Btn>
         </View>
       </View>
     </View>
@@ -123,6 +171,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   gridLabel: { fontSize: fontSize.xs, color: colors.sub, fontFamily: 'monospace' },
+  gridPhotoImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  selectedPhotoImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 8 },
+  loading: { paddingVertical: 80, alignItems: 'center', justifyContent: 'center' },
+  railHandle: { fontSize: fontSize.md, fontWeight: '700', color: colors.ink },
+  railLoc: { fontSize: fontSize.sm, color: colors.sub, marginTop: 2 },
   rail: {
     width: 360,
     borderLeftWidth: 1,

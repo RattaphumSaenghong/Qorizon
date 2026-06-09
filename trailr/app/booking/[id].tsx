@@ -1,32 +1,55 @@
 /**
- * One-Click Booking — BookA: inline in trip (flight + hotels + map)
+ * One-Click Booking — BookA: live flight + hotel offers for a trip (+ map).
  */
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useOfferSearch, useCreateBooking } from '@trailr/db';
+import type { BookingOffer } from '@trailr/db';
 import { colors, spacing, fontSize } from '../../src/theme/tokens';
 import { Wordmark } from '../../src/components/Wordmark';
 import { Chip } from '../../src/components/Chip';
 import { Btn } from '../../src/components/Btn';
-import { MapView, MapPin } from '../../src/components/MapView';
+import { MapView } from '../../src/components/MapView';
+import { useAuthStore } from '../../src/stores/authStore';
 
-function HotelRow({ accent = false }: { accent?: boolean }) {
+function baht(n: number): string {
+  return `฿${n.toLocaleString()}`;
+}
+
+function FlightCard({ offer, booking, onBook }: { offer: BookingOffer; booking: boolean; onBook: () => void }) {
   return (
-    <View style={[styles.hotelRow, accent && styles.hotelRowAccent]}>
+    <View style={styles.flightCard}>
+      <Text style={styles.flightIcon}>✈</Text>
+      <View style={styles.flightInfo}>
+        <Text style={styles.flightRoute}>{offer.title}</Text>
+        <Text style={styles.flightSub}>{offer.subtitle}</Text>
+      </View>
+      <View style={styles.spacer} />
+      <View style={styles.flightPrice}>
+        <Text style={styles.priceText}>{baht(offer.amount_thb)}</Text>
+        <Text style={styles.amadeusLabel}>via {offer.provider}</Text>
+      </View>
+      <Btn solid sm onPress={onBook}>{booking ? '…' : 'Book'}</Btn>
+    </View>
+  );
+}
+
+function HotelRow({ offer, onBook }: { offer: BookingOffer; onBook: () => void }) {
+  return (
+    <View style={styles.hotelRow}>
       <View style={styles.hotelPhoto}>
         <Text style={styles.hotelPhotoLabel}>[ hotel ]</Text>
       </View>
       <View style={styles.hotelMeta}>
-        <View style={[styles.bar, { width: '60%' }]} />
+        <Text style={styles.hotelName} numberOfLines={1}>{offer.title}</Text>
         <View style={styles.hotelTags}>
-          <Chip dot={false}>★ 8.9</Chip>
-          <Chip dot={false}>0.4km to Day 3</Chip>
+          <Chip dot={false}>{offer.subtitle}</Chip>
         </View>
-        <View style={[styles.bar, { width: '80%' }]} />
       </View>
       <View style={styles.hotelPrice}>
-        <Text style={styles.priceText}>฿2,400</Text>
-        <Btn solid sm>Book</Btn>
+        <Text style={styles.priceText}>{baht(offer.amount_thb)}</Text>
+        <Btn solid sm onPress={onBook}>Book</Btn>
       </View>
     </View>
   );
@@ -34,59 +57,95 @@ function HotelRow({ accent = false }: { accent?: boolean }) {
 
 export default function BookingScreen() {
   const router = useRouter();
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const tripId = id ?? '';
+  const user = useAuthStore((s) => s.user);
+
+  const flightsQ = useOfferSearch({ type: 'flight', origin: 'BKK', destination: 'KIX' });
+  const hotelsQ = useOfferSearch({ type: 'hotel', city: 'Kyoto', nights: 3 });
+  const createBooking = useCreateBooking(tripId);
+
+  const book = (offer: BookingOffer) => {
+    if (!user) {
+      router.push('/sign-in');
+      return;
+    }
+    createBooking.mutate(
+      {
+        type: offer.type,
+        provider: offer.provider,
+        trip_id: tripId,
+        external_ref: offer.id,
+        amount_thb: offer.amount_thb,
+        title: offer.title,
+      },
+      {
+        onSuccess: () =>
+          Alert.alert('Booked ✓', `${offer.title} added to your trip (pending).`),
+        onError: (e) => Alert.alert('Booking failed', String(e)),
+      },
+    );
+  };
+
+  const hotels = hotelsQ.data ?? [];
+  const hotelPins = hotels
+    .filter((h) => h.latitude != null && h.longitude != null)
+    .map((h) => ({
+      id: h.id,
+      latitude: h.latitude as number,
+      longitude: h.longitude as number,
+      location: h.title,
+      caption: h.subtitle,
+    }));
+
   return (
     <View style={styles.root}>
       {/* header */}
       <View style={styles.header}>
         <Wordmark size={22} />
         <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.back}>‹ Japan trip</Text>
+          <Text style={styles.back}>‹ back</Text>
         </TouchableOpacity>
         <Text style={styles.pageTitle}>Add stays & flights</Text>
         <View style={styles.spacer} />
-        <Chip dot={false}>Day 1–7</Chip>
+        <Chip dot={false}>Trailr earns a small commission</Chip>
       </View>
 
       <View style={styles.body}>
         {/* ── Left: booking column ── */}
         <ScrollView style={styles.bookingCol} contentContainerStyle={styles.bookingContent}>
-          {/* flight card */}
-          <View style={styles.flightCard}>
-            <Text style={styles.flightIcon}>✈</Text>
-            <View style={styles.flightInfo}>
-              <Text style={styles.flightRoute}>BKK → KIX</Text>
-              <Text style={styles.flightSub}>1 May · 1 stop · 7h 20m</Text>
-            </View>
-            <View style={styles.spacer} />
-            <View style={styles.flightPrice}>
-              <Text style={styles.priceText}>฿9,800</Text>
-              <Text style={styles.amadeusLabel}>via Amadeus</Text>
-            </View>
-            <Btn solid sm>Book</Btn>
-          </View>
+          {/* flights */}
+          {flightsQ.isLoading ? (
+            <ActivityIndicator color={colors.acc} />
+          ) : (
+            (flightsQ.data ?? []).map((offer) => (
+              <FlightCard key={offer.id} offer={offer} booking={createBooking.isPending} onBook={() => book(offer)} />
+            ))
+          )}
 
           {/* hotels header */}
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Stays near your route</Text>
-            <View style={styles.spacer} />
-            <Chip dot={false} accent>Agoda</Chip>
-            <Chip dot={false}>Booking.com</Chip>
           </View>
 
-          <HotelRow accent />
-          <HotelRow />
-          <HotelRow />
+          {hotelsQ.isLoading ? (
+            <ActivityIndicator color={colors.acc} />
+          ) : (
+            hotels.map((offer) => <HotelRow key={offer.id} offer={offer} onBook={() => book(offer)} />)
+          )}
         </ScrollView>
 
         {/* ── Right: map ── */}
         <View style={styles.mapCol}>
-          <MapView initialLongitude={135.7681} initialLatitude={35.0116} initialZoom={13}>
-            <MapPin x="40%" y="42%" label="A" accent size={26} />
-            <MapPin x="58%" y="34%" label="B" size={26} />
-            <MapPin x="50%" y="58%" label="C" size={26} />
+          <MapView
+            initialLatitude={hotelPins[0]?.latitude ?? 35.0116}
+            initialLongitude={hotelPins[0]?.longitude ?? 135.7681}
+            initialZoom={12}
+            posts={hotelPins}
+          >
             <View style={styles.mapLegend}>
               <View style={[styles.legendDot, { backgroundColor: colors.acc }]} />
-              <Text style={styles.legendText}>= your Day 3 stops</Text>
+              <Text style={styles.legendText}>= stays near your stops</Text>
             </View>
           </MapView>
         </View>
@@ -145,7 +204,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
   },
-  hotelRowAccent: { borderColor: colors.acc },
   hotelPhoto: {
     width: 110,
     height: 90,
@@ -156,8 +214,8 @@ const styles = StyleSheet.create({
   },
   hotelPhotoLabel: { fontSize: fontSize.xs, color: colors.sub, fontFamily: 'monospace' },
   hotelMeta: { flex: 1, justifyContent: 'center', gap: 6 },
+  hotelName: { fontSize: fontSize.base, fontWeight: '600', color: colors.ink },
   hotelTags: { flexDirection: 'row', gap: 6 },
-  bar: { height: 9, backgroundColor: colors.bar, borderRadius: 5 },
   hotelPrice: { alignItems: 'flex-end', justifyContent: 'center', gap: 8 },
   priceText: { fontSize: 18, color: colors.ink, fontWeight: '600' },
   mapCol: { flex: 1 },

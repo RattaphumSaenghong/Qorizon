@@ -1,0 +1,336 @@
+// Trailr schema — Prisma-owned rebuild of the former Supabase SQL.
+// Field names are snake_case to match column names 1:1 and the JSON shapes
+// the existing @trailr/db client consumes (no mapping layer).
+//
+// Differences from the old Supabase schema (intentional, see BACKEND_ARCHITECTURE.md):
+//   - users gains email + password_hash; the FK to auth.users is gone.
+//   - refresh_tokens table added for own-JWT auth.
+//   - No DB triggers / RLS / functions — all that logic lives in Nest services.
+//   - CHECK constraints (enum values, follower<>following, saved_items one-of)
+//     are enforced in the app layer via @trailr/shared enums + class-validator.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id              String   @id @default(uuid()) @db.Uuid
+  email           String   @unique
+  password_hash   String
+  username        String   @unique
+  display_name    String?
+  avatar_url      String?
+  bio             String?
+  real_name       String?  // shown on profile; phone visible to trip co-members only
+  phone           String?
+  language        String   @default("th")
+  account_type    String   @default("personal") // 'personal' | 'business' (business posts bypass the feed-eligibility rule)
+  follower_count  Int      @default(0)
+  following_count Int      @default(0)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  trips          Trip[]
+  stops          Stop[]
+  media          Media[]
+  trail_points   TrailPoint[]
+  likes          Like[]
+  comments       Comment[]
+  saved_items    SavedItem[]
+  bookings       Booking[]
+  refresh_tokens RefreshToken[]
+  following      Follow[]       @relation("follower")
+  followers      Follow[]       @relation("following")
+  notifications  Notification[] @relation("recipient")
+  acted          Notification[] @relation("actor")
+  trip_memberships TripMember[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  user_id    String    @db.Uuid
+  token_hash String
+  expires_at DateTime  @db.Timestamptz(6)
+  revoked    Boolean   @default(false)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@map("refresh_tokens")
+}
+
+model Trip {
+  id              String   @id @default(uuid()) @db.Uuid
+  user_id         String   @db.Uuid
+  title           String
+  description     String?
+  cover_image_url String?
+  status          String   @default("draft")
+  stage           String   @default("planning") // planning | living | album
+  destination     String?
+  budget          Int?
+  budget_currency String   @default("THB")
+  live_mode       Boolean  @default(false)
+  live_cadence    String   @default("daily")
+  visibility      String   @default("public")
+  forked_from_id  String?  @db.Uuid
+  fork_count      Int      @default(0)
+  start_date      DateTime? @db.Date
+  end_date        DateTime? @db.Date
+  album_overrides Json?
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  author       User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  forked_from  Trip?          @relation("TripForks", fields: [forked_from_id], references: [id], onDelete: SetNull)
+  forks        Trip[]         @relation("TripForks")
+  days         TripDay[]
+  stops        Stop[]
+  trail_points TrailPoint[]
+  live_batches LiveBatch[]
+  saved_items  SavedItem[]
+  bookings     Booking[]
+  notifications Notification[]
+  members      TripMember[]
+
+  @@index([user_id, created_at(sort: Desc)])
+  @@index([visibility])
+  @@index([forked_from_id])
+  @@map("trips")
+}
+
+model TripMember {
+  id           String    @id @default(uuid()) @db.Uuid
+  trip_id      String    @db.Uuid
+  user_id      String    @db.Uuid
+  role         String    @default("editor") // owner | editor | viewer
+  status       String    @default("pending") // pending | accepted | declined
+  invited_by   String?   @db.Uuid
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  responded_at DateTime?
+
+  trip Trip @relation(fields: [trip_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([trip_id, user_id])
+  @@index([user_id, status])
+  @@map("trip_members")
+}
+
+model TripDay {
+  id         String   @id @default(uuid()) @db.Uuid
+  trip_id    String   @db.Uuid
+  day_number Int
+  place      String?
+  date       DateTime? @db.Date
+
+  trip  Trip   @relation(fields: [trip_id], references: [id], onDelete: Cascade)
+  stops Stop[]
+
+  @@unique([trip_id, day_number])
+  @@index([trip_id, day_number])
+  @@map("trip_days")
+}
+
+model Stop {
+  id            String   @id @default(uuid()) @db.Uuid
+  trip_id       String   @db.Uuid
+  day_id        String?  @db.Uuid
+  user_id       String   @db.Uuid
+  status        String   @default("planned")
+  category      String   @default("place")
+  location_name String?
+  latitude      Float?
+  longitude     Float?
+  place_id      String?
+  planned_time  String?
+  duration_mins Int?
+  sort_order    Int      @default(0)
+  notes         String?
+  caption       String?
+  captured_at   DateTime? @db.Timestamptz(6)
+  batch_date    DateTime? @db.Date
+  // True only if this visited stop qualified as an in-travel post (temporal +
+  // within 1km of the trip trail, or a business account). Gates the feed.
+  feed_eligible Boolean  @default(false)
+  like_count    Int      @default(0)
+  comment_count Int      @default(0)
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  trip          Trip           @relation(fields: [trip_id], references: [id], onDelete: Cascade)
+  day           TripDay?       @relation(fields: [day_id], references: [id], onDelete: SetNull)
+  author        User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  media         Media[]
+  likes         Like[]
+  comments      Comment[]
+  saved_items   SavedItem[]
+  notifications Notification[]
+
+  @@index([trip_id, sort_order])
+  @@index([day_id, sort_order])
+  @@index([user_id, captured_at(sort: Desc)])
+  @@index([trip_id, batch_date])
+  @@map("stops")
+}
+
+model Media {
+  id            String   @id @default(uuid()) @db.Uuid
+  stop_id       String   @db.Uuid
+  user_id       String   @db.Uuid
+  type          String
+  url           String
+  cdn_url       String?
+  latitude      Float?
+  longitude     Float?
+  captured_at   DateTime? @db.Timestamptz(6)
+  duration_secs Int?
+  size_bytes    BigInt?
+  sort_order    Int      @default(0)
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  stop Stop @relation(fields: [stop_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([stop_id, sort_order])
+  @@map("media")
+}
+
+model TrailPoint {
+  id          String   @id @default(uuid()) @db.Uuid
+  trip_id     String   @db.Uuid
+  user_id     String   @db.Uuid
+  latitude    Float
+  longitude   Float
+  altitude    Float?
+  recorded_at DateTime @default(now()) @db.Timestamptz(6)
+
+  trip Trip @relation(fields: [trip_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([trip_id, recorded_at])
+  @@map("trail_points")
+}
+
+model LiveBatch {
+  id           String    @id @default(uuid()) @db.Uuid
+  trip_id      String    @db.Uuid
+  batch_date   DateTime  @db.Date
+  title        String?
+  stop_ids     String[]  @db.Uuid
+  published_at DateTime? @db.Timestamptz(6)
+  notified_at  DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+
+  trip          Trip           @relation(fields: [trip_id], references: [id], onDelete: Cascade)
+  notifications Notification[]
+
+  @@index([trip_id, batch_date])
+  @@map("live_batches")
+}
+
+model Follow {
+  follower_id  String   @db.Uuid
+  following_id String   @db.Uuid
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  follower  User @relation("follower", fields: [follower_id], references: [id], onDelete: Cascade)
+  following User @relation("following", fields: [following_id], references: [id], onDelete: Cascade)
+
+  @@id([follower_id, following_id])
+  @@index([following_id])
+  @@map("follows")
+}
+
+model Like {
+  user_id    String   @db.Uuid
+  stop_id    String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  stop Stop @relation(fields: [stop_id], references: [id], onDelete: Cascade)
+
+  @@id([user_id, stop_id])
+  @@index([stop_id])
+  @@map("likes")
+}
+
+model Comment {
+  id         String   @id @default(uuid()) @db.Uuid
+  user_id    String   @db.Uuid
+  stop_id    String   @db.Uuid
+  content    String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  stop Stop @relation(fields: [stop_id], references: [id], onDelete: Cascade)
+
+  @@index([stop_id, created_at])
+  @@map("comments")
+}
+
+model SavedItem {
+  id         String   @id @default(uuid()) @db.Uuid
+  user_id    String   @db.Uuid
+  stop_id    String?  @db.Uuid
+  trip_id    String?  @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  user User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  stop Stop? @relation(fields: [stop_id], references: [id], onDelete: Cascade)
+  trip Trip? @relation(fields: [trip_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at(sort: Desc)])
+  @@map("saved_items")
+}
+
+model Booking {
+  id             String   @id @default(uuid()) @db.Uuid
+  user_id        String   @db.Uuid
+  trip_id        String?  @db.Uuid
+  type           String
+  provider       String
+  external_ref   String?
+  status         String   @default("pending")
+  amount_thb     Decimal? @db.Decimal(10, 2)
+  commission_thb Decimal? @db.Decimal(10, 2)
+  raw_payload    Json?
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+
+  user User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  trip Trip? @relation(fields: [trip_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, created_at(sort: Desc)])
+  @@index([trip_id])
+  @@map("bookings")
+}
+
+model Notification {
+  id         String   @id @default(uuid()) @db.Uuid
+  user_id    String   @db.Uuid
+  type       String
+  actor_id   String?  @db.Uuid
+  trip_id    String?  @db.Uuid
+  stop_id    String?  @db.Uuid
+  batch_id   String?  @db.Uuid
+  read       Boolean  @default(false)
+  push_sent  Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  recipient User       @relation("recipient", fields: [user_id], references: [id], onDelete: Cascade)
+  actor     User?      @relation("actor", fields: [actor_id], references: [id], onDelete: Cascade)
+  trip      Trip?      @relation(fields: [trip_id], references: [id], onDelete: Cascade)
+  stop      Stop?      @relation(fields: [stop_id], references: [id], onDelete: Cascade)
+  batch     LiveBatch? @relation(fields: [batch_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at(sort: Desc)])
+  @@map("notifications")
+}

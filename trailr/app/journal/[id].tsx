@@ -2,28 +2,36 @@
  * Trip Journal — JournalA
  * Real trip data, scroll-synced day scrubber, fork modal → builder
  */
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
+  Animated,
   TouchableOpacity,
   ActivityIndicator,
+  Image,
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { colors, spacing, fontSize } from '../../src/theme/tokens';
+import { colors, spacing, fontSize, radius, shadow } from '../../src/theme/tokens';
 import { Wordmark } from '../../src/components/Wordmark';
 import { Avatar } from '../../src/components/Avatar';
 import { Chip } from '../../src/components/Chip';
 import { Btn } from '../../src/components/Btn';
-import { MapView, MapPin } from '../../src/components/MapView';
+import { MapView } from '../../src/components/MapView';
 import { ForkModal } from '../../src/components/ForkModal';
-import { getSupabaseClient } from '@trailr/db';
+import { fetchTrip, fetchTripDays, fetchTripStops, useForkTrip, useToggleSave, useSaved, useTrail } from '@trailr/db';
 import { Trip, Moment, Day } from '../../src/data/mockTrips';
+import { useAuthStore } from '../../src/stores/authStore';
+import { useTrailRecorder } from '../../src/hooks/useTrailRecorder';
+import { LiveBadge } from '../../src/components/LiveBadge';
+import { PressableScale } from '../../src/components/PressableScale';
+import { useCollapsibleSplit } from '../../src/hooks/useCollapsibleSplit';
+import { useToast } from '../../src/components/Toast';
 
 // ── Date helpers ─────────────────────────────────────────────
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -40,22 +48,13 @@ function fmtMonthYear(d: string | null): string {
 
 // ── Fetch + assemble a trip from the DB into the Trip shape ───
 async function fetchJournal(tripId: string): Promise<Trip | null> {
-  const db = getSupabaseClient() as any;
-
-  const { data: t, error } = await db
-    .from('trips')
-    .select(`*, author:users!trips_user_id_fkey(username,display_name)`)
-    .eq('id', tripId)
-    .maybeSingle();
-  if (error) throw error;
+  const t = await fetchTrip(tripId).catch(() => null);
   if (!t) return null;
 
-  const { data: dayRows } = await db
-    .from('trip_days').select('*').eq('trip_id', tripId).order('day_number');
-  const { data: stopRows } = await db
-    .from('stops').select('*').eq('trip_id', tripId).eq('status', 'visited').order('sort_order');
-
-  const allStops = stopRows ?? [];
+  const [dayRows, allStops] = await Promise.all([
+    fetchTripDays(tripId),
+    fetchTripStops(tripId, 'visited'),
+  ]);
 
   const days: Day[] = (dayRows ?? []).map((d: any) => ({
     n: d.day_number,
@@ -64,6 +63,7 @@ async function fetchJournal(tripId: string): Promise<Trip | null> {
     moments: allStops
       .filter((s: any) => s.day_id === d.id)
       .map((s: any, i: number): Moment => ({
+        id: s.id,
         time: s.planned_time ?? '',
         location: s.location_name ?? '',
         caption: s.caption ?? '',
@@ -72,6 +72,7 @@ async function fetchJournal(tripId: string): Promise<Trip | null> {
         hasVideo: false,
         hasAudio: false,
         photoHeight: [200, 170, 150][i % 3],
+        photoUrl: (s.media?.[0]?.cdn_url ?? s.media?.[0]?.url) || undefined,
       })),
   }));
 
@@ -80,9 +81,11 @@ async function fetchJournal(tripId: string): Promise<Trip | null> {
 
   return {
     id: t.id,
+    ownerId: t.user_id,
     title: t.title,
     author: t.author?.display_name ?? t.author?.username ?? '',
     authorHandle: '@' + (t.author?.username ?? 'unknown'),
+    authorAvatar: t.author?.avatar_url ?? undefined,
     duration: `${days.length} days`,
     photoCount: allStops.length,
     audioCount: 0,
@@ -90,36 +93,43 @@ async function fetchJournal(tripId: string): Promise<Trip | null> {
     likeCount,
     coverLocation: allStops[0]?.location_name ?? t.title,
     startDate: fmtMonthYear(t.start_date),
-    centerLat: center.latitude,
-    centerLon: center.longitude,
+    centerLat: center.latitude ?? 13.75,
+    centerLon: center.longitude ?? 100.5,
     centerZoom: 5,
     days,
     forkedFrom: undefined,
   };
 }
 
-const DAY_PINS: Array<{ x: `${number}%`; y: `${number}%` }> = [
-  { x: '28%', y: '62%' },
-  { x: '42%', y: '44%' },
-  { x: '58%', y: '34%' },
-  { x: '72%', y: '22%' },
-];
-
 const JOURNAL_TABS = ['Journal', 'Map', 'Album', 'Bookings'];
 
 // ── Moment card ──────────────────────────────────────────────
-function MomentCard({ moment, last }: { moment: Moment; last: boolean }) {
+function MomentCard({
+  moment,
+  last,
+  selected,
+  onPress,
+}: {
+  moment: Moment;
+  last: boolean;
+  selected: boolean;
+  onPress: () => void;
+}) {
   return (
-    <View style={styles.moment}>
+    <TouchableOpacity style={styles.moment} activeOpacity={0.85} onPress={onPress}>
       <View style={styles.gutter}>
         <Text style={styles.gutterTime}>{moment.time}</Text>
-        <View style={styles.gutterDot} />
+        <View style={[styles.gutterDot, selected && styles.gutterDotActive]} />
         {!last && <View style={styles.gutterLine} />}
       </View>
-      <View style={styles.momentContent}>
+      <View style={[styles.momentContent, selected && styles.momentContentActive]}>
         <Chip dot accent style={styles.locChip}>{moment.location}</Chip>
         <View style={[styles.momentPhoto, { height: moment.photoHeight }]}>
-          <Text style={styles.photoLabel}>[ photo ]</Text>
+          {moment.photoUrl ? (
+            <Image source={{ uri: moment.photoUrl }} style={styles.momentPhotoImg} resizeMode="cover" />
+          ) : (
+            <Text style={styles.photoLabel}>[ photo ]</Text>
+          )}
           {moment.hasVideo && (
             <View style={styles.videoTag}>
               <Text style={styles.videoTagText}>▶ 0:18</Text>
@@ -135,7 +145,7 @@ function MomentCard({ moment, last }: { moment: Moment; last: boolean }) {
           </TouchableOpacity>
         )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -169,7 +179,38 @@ export default function JournalScreen() {
   const [activeTab, setActiveTab] = useState('Journal');
   const [currentDay, setCurrentDay] = useState(1);
   const [forkVisible, setForkVisible] = useState(false);
+  const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
+  // Collapse journal → map-focused (animated 70/30 ↔ 30/70).
+  const { focused: mapFocus, toggle: toggleMapFocus, contentWidth } = useCollapsibleSplit();
+  const { data: trail = [] } = useTrail(id ?? '');
+  const recorder = useTrailRecorder(id ?? '');
+  const toast = useToast();
+  useEffect(() => {
+    if (recorder.error) toast(recorder.error);
+  }, [recorder.error, toast]);
   const scrollRef = useRef<ScrollView>(null);
+  const forkMutation = useForkTrip();
+  const currentUser = useAuthStore((s) => s.user);
+  const toggleSave = useToggleSave();
+  const { data: savedItems = [] } = useSaved();
+  const isSaved = savedItems.some((s) => s.trip?.id === id);
+  const onSaveTrip = () => {
+    if (!currentUser) { router.push('/sign-in'); return; }
+    toggleSave.mutate({ trip_id: id! });
+  };
+  const onShareTrip = async () => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://trailr.app';
+    const url = `${origin}/journal/${id}`;
+    const nav = typeof navigator !== 'undefined' ? (navigator as any) : undefined;
+    if (nav?.share) {
+      nav.share({ title: 'Trailr trip', url }).catch(() => undefined);
+    } else if (nav?.clipboard) {
+      await nav.clipboard.writeText(url);
+      toast('Link copied to clipboard');
+    } else {
+      toast('Share: ' + url);
+    }
+  };
 
   // Rough scroll-to-day sync: each day block is ~(moments * 250 + 100)px
   const dayOffsets = useRef<number[]>([]);
@@ -190,11 +231,18 @@ export default function JournalScreen() {
     setCurrentDay(n);
   };
 
-  const handleForkConfirm = (mode: 'full' | 'skim') => {
+  const handleForkConfirm = async (mode: 'full' | 'skim') => {
     setForkVisible(false);
-    // When wired to the backend: useForkTrip().mutate({ sourceTripId: id, mode }).
-    // For now, open the builder on the (mock) forked trip.
-    router.push(`/builder/${id}?mode=${mode}`);
+    if (!currentUser) {
+      router.push('/sign-in'); // forking requires an account (RLS: owner = auth user)
+      return;
+    }
+    try {
+      const newTrip = await forkMutation.mutateAsync({ sourceTripId: id!, mode });
+      router.push(`/builder/${newTrip.id}`);
+    } catch (e) {
+      toast('Couldn’t copy this trip — please try again');
+    }
   };
 
   if (isLoading) {
@@ -214,6 +262,28 @@ export default function JournalScreen() {
     );
   }
 
+  const isOwner = !!currentUser && currentUser.id === trip.ownerId;
+
+  // Real GPS pins for the map — one per visited stop that has coordinates.
+  const mapPosts = trip.days
+    .flatMap((d) => d.moments)
+    .filter((m) => m.latitude && m.longitude)
+    .map((m, i) => ({
+      id: m.id ?? `${m.location}-${i}`,
+      latitude: m.latitude,
+      longitude: m.longitude,
+      location: m.location,
+      caption: m.caption,
+      hasVideo: m.hasVideo,
+      photoUrl: m.photoUrl,
+    }));
+  // Dashed line linking the planned stops in order.
+  const stopRoute = mapPosts.map((p) => [p.longitude, p.latitude] as [number, number]);
+  // Solid line = the recorded GPS trail (Strava-style breadcrumb), if any.
+  const gpsTrail = trail
+    .filter((p) => p.latitude != null && p.longitude != null)
+    .map((p) => [p.longitude, p.latitude] as [number, number]);
+
   return (
     <View style={styles.root}>
       {/* ── Header ── */}
@@ -224,13 +294,24 @@ export default function JournalScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1 }} />
         <Chip dot={false}>♡ {trip.likeCount.toLocaleString()}</Chip>
-        <Btn sm>↗ Share</Btn>
+        {isOwner && (
+          <Btn
+            sm
+            solid={recorder.isRecording}
+            onPress={() => (recorder.isRecording ? recorder.stop() : recorder.start())}
+          >
+            {recorder.isRecording ? `● Recording (${recorder.pointCount})` : '● Record trail'}
+          </Btn>
+        )}
+        <Btn sm onPress={onShareTrip}>↗ Share</Btn>
+        <Btn sm onPress={onSaveTrip}>{isSaved ? '🔖 Saved' : '🔖 Save'}</Btn>
         <Btn solid sm onPress={() => setForkVisible(true)}>⑂ Use this trip</Btn>
-        <Avatar size={34} ring />
+        <Avatar size={34} ring imageUri={currentUser?.avatar_url} />
       </View>
 
       <View style={styles.body}>
-        {/* ── Left: journal ── */}
+        {/* ── Left: journal (collapses to 30% in map-focus) ── */}
+        <Animated.View style={{ width: contentWidth }}>
         <ScrollView
           ref={scrollRef}
           style={styles.journalCol}
@@ -251,7 +332,7 @@ export default function JournalScreen() {
 
           {/* author */}
           <View style={styles.authorRow}>
-            <Avatar size={42} ring />
+            <Avatar size={42} ring imageUri={trip.authorAvatar} />
             <View style={styles.authorMeta}>
               <Text style={styles.authorHandle}>{trip.authorHandle}</Text>
               <Text style={styles.authorStats}>
@@ -293,9 +374,11 @@ export default function JournalScreen() {
               <DayHeader day={day} />
               {day.moments.map((m, mi) => (
                 <MomentCard
-                  key={`${day.n}-${m.time}`}
+                  key={`${day.n}-${mi}`}
                   moment={m}
                   last={mi === day.moments.length - 1}
+                  selected={!!m.id && m.id === selectedStopId}
+                  onPress={() => setSelectedStopId(m.id ?? null)}
                 />
               ))}
             </View>
@@ -307,21 +390,31 @@ export default function JournalScreen() {
             <Btn solid onPress={() => setForkVisible(true)}>⑂ Use this trip as your template</Btn>
           </View>
         </ScrollView>
+        </Animated.View>
 
-        {/* ── Right: sticky map ── */}
-        <View style={styles.mapCol}>
+        {/* ── Right: sticky map (fills remaining width) ── */}
+        <Animated.View style={[styles.mapCol, styles.mapColFill]}>
+          {/* collapse handle — toggles journal/map split between 70/30 and 30/70 */}
+          <PressableScale style={styles.collapseHandle} onPress={toggleMapFocus}>
+            <Text style={styles.collapseHandleIcon}>{mapFocus ? '›' : '‹'}</Text>
+          </PressableScale>
           <View style={styles.mapWrapper}>
-          <MapView initialLongitude={trip.centerLon} initialLatitude={trip.centerLat} initialZoom={trip.centerZoom}>
-            {trip.days.map((day, i) => (
-              <MapPin
-                key={day.n}
-                x={DAY_PINS[i % DAY_PINS.length].x}
-                y={DAY_PINS[i % DAY_PINS.length].y}
-                label={day.n}
-                accent={day.n <= currentDay}
-                size={26}
-              />
-            ))}
+          <MapView
+            initialLongitude={trip.centerLon}
+            initialLatitude={trip.centerLat}
+            initialZoom={trip.centerZoom}
+            posts={mapPosts}
+            trail={gpsTrail}
+            route={stopRoute}
+            activeId={selectedStopId}
+            onSelectPost={setSelectedStopId}
+          >
+            {/* live recording badge */}
+            {recorder.isRecording && (
+              <View style={styles.liveBadgeWrap}>
+                <LiveBadge />
+              </View>
+            )}
 
             {/* current day badge */}
             <View style={styles.dayBadge}>
@@ -364,7 +457,7 @@ export default function JournalScreen() {
               </TouchableOpacity>
             ))}
           </View>
-        </View>
+        </Animated.View>
       </View>
 
       {/* ── Fork modal ── */}
@@ -465,8 +558,17 @@ const styles = StyleSheet.create({
     borderColor: colors.acc,
     backgroundColor: colors.accSoft,
   },
+  gutterDotActive: { backgroundColor: colors.acc, transform: [{ scale: 1.3 }] },
   gutterLine: { width: 2, flex: 1, backgroundColor: colors.line, marginTop: 2, minHeight: 20 },
   momentContent: { flex: 1, paddingBottom: spacing.xl, gap: spacing.sm },
+  momentContentActive: {
+    borderLeftWidth: 3,
+    borderLeftColor: colors.acc,
+    paddingLeft: spacing.md,
+    marginLeft: -spacing.md,
+    backgroundColor: colors.accSoft,
+    borderRadius: radius.md,
+  },
   locChip: { alignSelf: 'flex-start' },
   momentPhoto: {
     backgroundColor: colors.panel,
@@ -476,7 +578,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     position: 'relative',
+    overflow: 'hidden',
   },
+  momentPhotoImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   photoLabel: { fontSize: fontSize.xs, color: colors.sub, fontFamily: 'monospace' },
   videoTag: {
     position: 'absolute',
@@ -517,16 +621,34 @@ const styles = StyleSheet.create({
 
   // sticky map
   mapCol: {
-    width: 420,
     borderLeftWidth: 1,
     borderLeftColor: colors.line,
-    flexShrink: 0,
     flexDirection: 'column',
     alignSelf: 'stretch',
   },
+  mapColFill: { flex: 1 },
+  collapseHandle: {
+    position: 'absolute',
+    left: 0,
+    top: '50%',
+    marginTop: -24,
+    zIndex: 10,
+    width: 22,
+    height: 48,
+    backgroundColor: colors.paper,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderTopRightRadius: 12,
+    borderBottomRightRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.sm,
+  },
+  collapseHandleIcon: { fontSize: 20, color: colors.ink, fontWeight: '700' },
   mapWrapper: {
     flex: 1,
   },
+  liveBadgeWrap: { position: 'absolute', top: 16, right: 16, zIndex: 5 },
   dayBadge: {
     position: 'absolute',
     left: 16,
