@@ -1,10 +1,12 @@
 import {
+  IsArray,
   IsDateString,
   IsIn,
   IsInt,
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
 } from 'class-validator';
 import {
   STOP_CATEGORY,
@@ -47,11 +49,23 @@ export class CreateStopDto {
 
   @IsOptional()
   @IsString()
-  planned_time?: string;
+  planned_start?: string;
+
+  @IsOptional()
+  @IsString()
+  planned_end?: string;
 
   @IsOptional()
   @IsInt()
   duration_mins?: number;
+
+  @IsOptional()
+  @IsInt()
+  cost?: number;
+
+  @IsOptional()
+  @IsUUID()
+  paid_by?: string;
 
   @IsOptional()
   @IsInt()
@@ -68,4 +82,13 @@ export class CreateStopDto {
   @IsOptional()
   @IsDateString()
   captured_at?: string;
+
+  @IsOptional()
+  @IsIn(['shared', 'assigned'])
+  scope?: 'shared' | 'assigned';
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  assignee_ids?: string[];
 }

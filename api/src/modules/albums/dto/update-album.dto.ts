@@ -12,6 +12,11 @@ export class UpdateAlbumDto {
   excluded?: string[];
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  included?: string[];
+
+  @IsOptional()
   @IsObject()
   captions?: Record<string, string>;
 }

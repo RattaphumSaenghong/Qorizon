@@ -2,7 +2,7 @@ import type { AuthUser } from './auth';
 import type { UserLanguage } from './enums';
 
 /** Public profile shape (same fields as the authed user — never email/password). */
-export type PublicUser = AuthUser;
+export type PublicUser = Omit<AuthUser, 'forwarding_token'>;
 
 export interface UpdateUserRequest {
   display_name?: string;

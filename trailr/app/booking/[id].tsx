@@ -1,17 +1,21 @@
 /**
  * One-Click Booking — BookA: live flight + hotel offers for a trip (+ map).
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useOfferSearch, useCreateBooking } from '@trailr/db';
+import { useOfferSearch, useCreateBooking, useTripMembers } from '@trailr/db';
 import type { BookingOffer } from '@trailr/db';
-import { colors, spacing, fontSize } from '../../src/theme/tokens';
+import { colors, spacing, fontSize, radius } from '../../src/theme/tokens';
 import { Wordmark } from '../../src/components/Wordmark';
 import { Chip } from '../../src/components/Chip';
 import { Btn } from '../../src/components/Btn';
 import { MapView } from '../../src/components/MapView';
+import { MapSheet } from '../../src/components/MapSheet';
 import { useAuthStore } from '../../src/stores/authStore';
+import { useResponsive } from '../../src/hooks/useResponsive';
+import { WhoForControl } from '../../src/components/WhoForControl';
+import type { AssigneeMember } from '../../src/components/WhoForControl';
 
 function baht(n: number): string {
   return `฿${n.toLocaleString()}`;
@@ -28,7 +32,7 @@ function FlightCard({ offer, booking, onBook }: { offer: BookingOffer; booking: 
       <View style={styles.spacer} />
       <View style={styles.flightPrice}>
         <Text style={styles.priceText}>{baht(offer.amount_thb)}</Text>
-        <Text style={styles.amadeusLabel}>via {offer.provider}</Text>
+        <Text style={styles.providerLabel}>via {offer.provider}</Text>
       </View>
       <Btn solid sm onPress={onBook}>{booking ? '…' : 'Book'}</Btn>
     </View>
@@ -57,6 +61,7 @@ function HotelRow({ offer, onBook }: { offer: BookingOffer; onBook: () => void }
 
 export default function BookingScreen() {
   const router = useRouter();
+  const { isPhone } = useResponsive();
   const { id } = useLocalSearchParams<{ id: string }>();
   const tripId = id ?? '';
   const user = useAuthStore((s) => s.user);
@@ -64,6 +69,17 @@ export default function BookingScreen() {
   const flightsQ = useOfferSearch({ type: 'flight', origin: 'BKK', destination: 'KIX' });
   const hotelsQ = useOfferSearch({ type: 'hotel', city: 'Kyoto', nights: 3 });
   const createBooking = useCreateBooking(tripId);
+  const [bookingAssigneeIds, setBookingAssigneeIds] = useState<string[]>([]);
+
+  const { data: memberItems = [] } = useTripMembers(tripId);
+  const assigneeMembers: AssigneeMember[] = memberItems
+    .filter((m) => m.status === 'accepted')
+    .map((m) => ({
+      id: m.user.id,
+      username: m.user.username,
+      display_name: m.user.display_name,
+      avatar_url: m.user.avatar_url,
+    }));
 
   const book = (offer: BookingOffer) => {
     if (!user) {
@@ -78,6 +94,7 @@ export default function BookingScreen() {
         external_ref: offer.id,
         amount_thb: offer.amount_thb,
         title: offer.title,
+        ...(bookingAssigneeIds.length > 0 ? { assignee_ids: bookingAssigneeIds } : {}),
       },
       {
         onSuccess: () =>
@@ -98,58 +115,73 @@ export default function BookingScreen() {
       caption: h.subtitle,
     }));
 
+  const mapBlock = (
+    <MapView
+      initialLatitude={hotelPins[0]?.latitude ?? 35.0116}
+      initialLongitude={hotelPins[0]?.longitude ?? 135.7681}
+      initialZoom={12}
+      posts={hotelPins}
+    >
+      <View style={styles.mapLegend}>
+        <View style={[styles.legendDot, { backgroundColor: colors.acc }]} />
+        <Text style={styles.legendText}>= stays near your stops</Text>
+      </View>
+    </MapView>
+  );
+
+  const bookingList = (
+    <ScrollView style={isPhone ? undefined : styles.bookingCol} contentContainerStyle={[styles.bookingContent, isPhone && styles.bookingContentPhone]}>
+      {assigneeMembers.length >= 2 && (
+        <View style={styles.whoSection}>
+          <WhoForControl
+            members={assigneeMembers}
+            assigneeIds={bookingAssigneeIds}
+            onChange={setBookingAssigneeIds}
+            currentUserId={user?.id}
+          />
+        </View>
+      )}
+      {flightsQ.isLoading ? (
+        <ActivityIndicator color={colors.acc} />
+      ) : (
+        (flightsQ.data ?? []).map((offer) => (
+          <FlightCard key={offer.id} offer={offer} booking={createBooking.isPending} onBook={() => book(offer)} />
+        ))
+      )}
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Stays near your route</Text>
+      </View>
+      {hotelsQ.isLoading ? (
+        <ActivityIndicator color={colors.acc} />
+      ) : (
+        hotels.map((offer) => <HotelRow key={offer.id} offer={offer} onBook={() => book(offer)} />)
+      )}
+    </ScrollView>
+  );
+
   return (
     <View style={styles.root}>
-      {/* header */}
-      <View style={styles.header}>
+      <View style={[styles.header, isPhone && styles.headerPhone]}>
         <Wordmark size={22} />
         <TouchableOpacity onPress={() => router.back()}>
           <Text style={styles.back}>‹ back</Text>
         </TouchableOpacity>
-        <Text style={styles.pageTitle}>Add stays & flights</Text>
+        {!isPhone && <Text style={styles.pageTitle}>Add stays & flights</Text>}
         <View style={styles.spacer} />
-        <Chip dot={false}>Trailr earns a small commission</Chip>
+        {!isPhone && <Chip dot={false}>Trailr earns a small commission</Chip>}
       </View>
 
-      <View style={styles.body}>
-        {/* ── Left: booking column ── */}
-        <ScrollView style={styles.bookingCol} contentContainerStyle={styles.bookingContent}>
-          {/* flights */}
-          {flightsQ.isLoading ? (
-            <ActivityIndicator color={colors.acc} />
-          ) : (
-            (flightsQ.data ?? []).map((offer) => (
-              <FlightCard key={offer.id} offer={offer} booking={createBooking.isPending} onBook={() => book(offer)} />
-            ))
-          )}
-
-          {/* hotels header */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Stays near your route</Text>
-          </View>
-
-          {hotelsQ.isLoading ? (
-            <ActivityIndicator color={colors.acc} />
-          ) : (
-            hotels.map((offer) => <HotelRow key={offer.id} offer={offer} onBook={() => book(offer)} />)
-          )}
-        </ScrollView>
-
-        {/* ── Right: map ── */}
-        <View style={styles.mapCol}>
-          <MapView
-            initialLatitude={hotelPins[0]?.latitude ?? 35.0116}
-            initialLongitude={hotelPins[0]?.longitude ?? 135.7681}
-            initialZoom={12}
-            posts={hotelPins}
-          >
-            <View style={styles.mapLegend}>
-              <View style={[styles.legendDot, { backgroundColor: colors.acc }]} />
-              <Text style={styles.legendText}>= stays near your stops</Text>
-            </View>
-          </MapView>
+      {isPhone ? (
+        <View style={styles.bodyPhone}>
+          {bookingList}
+          <MapSheet title="Stays near your route">{mapBlock}</MapSheet>
         </View>
-      </View>
+      ) : (
+        <View style={styles.body}>
+          {bookingList}
+          <View style={styles.mapCol}>{mapBlock}</View>
+        </View>
+      )}
     </View>
   );
 }
@@ -166,12 +198,22 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
     flexShrink: 0,
   },
+  headerPhone: { height: 48, paddingHorizontal: spacing.lg },
   back: { color: colors.sub, fontSize: fontSize.md },
   pageTitle: { fontSize: 20, color: colors.ink },
   spacer: { flex: 1 },
   body: { flex: 1, flexDirection: 'row' },
+  bodyPhone: { flex: 1 },
   bookingCol: { width: 560, borderRightWidth: 1, borderRightColor: colors.line },
   bookingContent: { padding: spacing.xl, gap: spacing.md },
+  bookingContentPhone: { paddingBottom: 160 },
+  whoSection: {
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.panel,
+  },
   flightCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -187,7 +229,7 @@ const styles = StyleSheet.create({
   flightRoute: { fontSize: 17, color: colors.ink },
   flightSub: { fontSize: fontSize.sm, color: colors.sub },
   flightPrice: { alignItems: 'flex-end', gap: 2 },
-  amadeusLabel: { fontSize: fontSize.xs, color: colors.sub, fontFamily: 'monospace' },
+  providerLabel: { fontSize: fontSize.xs, color: colors.sub, fontFamily: 'monospace' },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -18,9 +18,11 @@ import { TopBar } from '../../src/components/TopBar';
 import { Btn } from '../../src/components/Btn';
 import { Chip } from '../../src/components/Chip';
 import { CoverImage } from '../../src/components/CoverImage';
+import type { ViewStyle } from 'react-native';
 import { useAuthStore } from '../../src/stores/authStore';
+import { useResponsive } from '../../src/hooks/useResponsive';
 
-function SavedCard({ item, onOpen, onRemove }: { item: SavedItem; onOpen: () => void; onRemove: () => void }) {
+function SavedCard({ item, onOpen, onRemove, cardStyle }: { item: SavedItem; onOpen: () => void; onRemove: () => void; cardStyle?: ViewStyle }) {
   const isTrip = !!item.trip;
   const title = isTrip ? item.trip!.title : item.stop!.location_name ?? 'Saved stop';
   const subtitle = isTrip
@@ -31,7 +33,7 @@ function SavedCard({ item, onOpen, onRemove }: { item: SavedItem; onOpen: () => 
     : item.stop!.media?.[0]?.cdn_url ?? item.stop!.media?.[0]?.url;
 
   return (
-    <TouchableOpacity style={styles.card} onPress={onOpen} activeOpacity={0.88}>
+    <TouchableOpacity style={[styles.card, cardStyle]} onPress={onOpen} activeOpacity={0.88}>
       <View style={styles.cover}>
         <CoverImage
           uri={uri}
@@ -54,6 +56,7 @@ function SavedCard({ item, onOpen, onRemove }: { item: SavedItem; onOpen: () => 
 
 export default function SavedScreen() {
   const router = useRouter();
+  const { isPhone } = useResponsive();
   const user = useAuthStore((s) => s.user);
   const { data: items = [], isLoading } = useSaved();
   const unsave = useUnsaveItem();
@@ -87,13 +90,14 @@ export default function SavedScreen() {
           <Text style={styles.label}>Nothing saved yet. Tap the bookmark on a post or trip.</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.grid}>
+        <ScrollView contentContainerStyle={[styles.grid, isPhone && styles.gridPhone]}>
           {items.map((item) => (
             <SavedCard
               key={item.id}
               item={item}
               onOpen={() => openItem(item)}
               onRemove={() => unsave.mutate(item.id)}
+              cardStyle={isPhone ? styles.cardPhone : undefined}
             />
           ))}
         </ScrollView>
@@ -107,6 +111,8 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.xxl },
   label: { fontSize: fontSize.lg, color: colors.sub, textAlign: 'center' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.lg, padding: spacing.xxl },
+  gridPhone: { padding: spacing.lg, gap: spacing.md },
+  cardPhone: { width: '100%' },
   card: {
     width: 240,
     borderRadius: radius.md,

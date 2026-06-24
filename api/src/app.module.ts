@@ -18,6 +18,10 @@ import { BookingsModule } from './modules/bookings/bookings.module';
 import { SavedModule } from './modules/saved/saved.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { MembersModule } from './modules/members/members.module';
+import { MessagesModule } from './modules/messages/messages.module';
+import { SearchModule } from './modules/search/search.module';
+import { IngestionModule } from './modules/ingestion/ingestion.module';
+import { RecommendationsModule } from './modules/recommendations/recommendations.module';
 
 @Module({
   imports: [
@@ -37,6 +41,10 @@ import { MembersModule } from './modules/members/members.module';
     SavedModule,
     CommentsModule,
     MembersModule,
+    MessagesModule,
+    SearchModule,
+    IngestionModule,
+    RecommendationsModule,
   ],
   providers: [
     // JWT auth is the default for every route; @Public() opts out.

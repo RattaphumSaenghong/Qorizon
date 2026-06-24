@@ -43,6 +43,9 @@ supabase/.env
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+*.out
+*.err
+api/api-*.txt
 
 # ── OS ────────────────────────────────────────────────────────
 .DS_Store

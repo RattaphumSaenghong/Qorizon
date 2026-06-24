@@ -5,19 +5,23 @@
 
 export type Json = string | number | boolean | null | { [key: string]: Json } | Json[];
 
-export type TripStatus = 'draft' | 'active' | 'completed';
+export type TripStatus = 'draft' | 'active' | 'completed' | 'archived';
 export type TripVisibility = 'public' | 'followers' | 'link_only' | 'private';
 export type LiveCadence = 'hourly' | 'daily' | 'manual';
+export type TransportMode = 'train' | 'transit' | 'car' | 'walk' | 'mixed';
 export type StopStatus = 'planned' | 'visited' | 'skipped';
+export type StopScope = 'shared' | 'assigned';
 export type StopCategory = 'place' | 'landmark' | 'food' | 'activity' | 'hotel' | 'flight' | 'transport' | 'note';
 /** Categories a skim-fork excludes (logistics you'll re-plan yourself). */
 export const SKIM_EXCLUDED_CATEGORIES: StopCategory[] = ['hotel', 'flight', 'transport'];
 export type ForkMode = 'full' | 'skim';
 export type MediaType = 'photo' | 'video' | 'audio';
+export type MediaVisibility = 'shared' | 'private';
 export type BookingType = 'flight' | 'hotel';
-export type BookingProvider = 'amadeus' | 'agoda' | 'booking_com' | 'mock';
+export type BookingProvider = 'duffel' | 'liteapi' | 'email' | 'mock';
 export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
-export type NotificationType = 'live_batch' | 'follow' | 'like' | 'comment';
+export type NotificationType = 'live_batch' | 'follow' | 'like' | 'comment' | 'trip_invite' | 'trip_message' | 'member_accepted' | 'member_declined' | 'inventory_item';
+export type InventoryStatus = 'unmatched' | 'matched' | 'dismissed';
 export type UserLanguage = 'th' | 'en';
 
 // ── Row types ────────────────────────────────────────────────
@@ -25,6 +29,7 @@ export type UserLanguage = 'th' | 'en';
 export interface UserRow {
   id: string;
   username: string;
+  forwarding_token?: string | null;
   display_name: string | null;
   avatar_url: string | null;
   bio: string | null;
@@ -66,6 +71,7 @@ export interface AlbumOverrides {
   order?: string[];                       // ordered media ids
   captions?: Record<string, string>;      // media_id → caption
   excluded?: string[];                    // excluded media ids
+  included?: string[];                    // shared pool media from others pulled in
 }
 
 export interface TripRow {
@@ -76,6 +82,7 @@ export interface TripRow {
   cover_image_url: string | null;
   status: TripStatus;
   stage: 'planning' | 'living' | 'album';
+  transport_mode: TransportMode;
   destination: string | null;
   budget: number | null;
   budget_currency: string;
@@ -86,7 +93,6 @@ export interface TripRow {
   fork_count: number;
   start_date: string | null;
   end_date: string | null;
-  album_overrides: AlbumOverrides | null;
   created_at: string;
   updated_at: string;
 }
@@ -106,14 +112,19 @@ export interface StopRow {
   day_id: string | null;
   user_id: string;
   status: StopStatus;
+  scope: StopScope;
+  assignees: AuthorLite[];
   category: StopCategory;
   location_name: string | null;
   latitude: number | null;
   longitude: number | null;
   place_id: string | null;
   // plan face
-  planned_time: string | null;
+  planned_start: string | null;
+  planned_end: string | null;
   duration_mins: number | null;
+  cost: number | null;
+  paid_by: string | null;
   sort_order: number;
   notes: string | null;
   // story face
@@ -129,9 +140,11 @@ export interface StopRow {
 
 export interface MediaRow {
   id: string;
-  stop_id: string;
+  trip_id: string;
+  stop_id: string | null;
   user_id: string;
   type: MediaType;
+  visibility: MediaVisibility;
   url: string;
   cdn_url: string | null;
   latitude: number | null;
@@ -141,6 +154,27 @@ export interface MediaRow {
   size_bytes: number | null;
   sort_order: number;
   created_at: string;
+}
+
+/** A photo in the trip-level shared pool (includes location_name from the owning stop if any). */
+export interface PoolItem extends MediaRow {
+  location_name: string | null;
+}
+
+export interface UploadTripMediaRequest {
+  type: MediaType;
+  content_base64: string;
+  content_type: string;
+  visibility?: MediaVisibility;
+  stop_id?: string;
+  latitude?: number;
+  longitude?: number;
+  captured_at?: string;
+}
+
+export interface UpdateMediaRequest {
+  visibility?: MediaVisibility;
+  stop_id?: string | null;
 }
 
 export interface TrailPointRow {
@@ -206,6 +240,17 @@ export interface BookingRow {
   created_at: string;
 }
 
+export interface InventoryItemRow {
+  id: string;
+  user_id: string;
+  source: string;
+  type: BookingType;
+  parsed: Record<string, unknown>;
+  status: InventoryStatus;
+  matched_stop_id: string | null;
+  received_at: string;
+}
+
 /** A bookable offer from a provider search (not persisted until booked). */
 export interface BookingOffer {
   id: string;
@@ -237,7 +282,27 @@ export interface CreateBookingRequest {
   external_ref?: string;
   amount_thb: number;
   title?: string;
+  assignee_ids?: string[];
   meta?: Record<string, unknown>;
+  passenger_details?: PassengerDetails;
+  guest_details?: GuestDetails;
+}
+
+export interface PassengerDetails {
+  title?: string;
+  given_name: string;
+  family_name: string;
+  born_on?: string;
+  gender?: string;
+  email?: string;
+  phone_number?: string;
+}
+
+export interface GuestDetails {
+  given_name: string;
+  family_name: string;
+  email?: string;
+  phone_number?: string;
 }
 
 export interface NotificationRow {
@@ -255,18 +320,22 @@ export interface NotificationRow {
 
 // ── Insert helpers ───────────────────────────────────────────
 
-export type InsertTrip = Omit<TripRow, 'id' | 'created_at' | 'updated_at' | 'fork_count'> & { id?: string };
+export type InsertTrip = Omit<TripRow, 'id' | 'created_at' | 'updated_at' | 'fork_count' | 'transport_mode'> & {
+  id?: string;
+  backdated?: boolean;
+  transport_mode?: TransportMode;
+};
 export type InsertTripDay = Omit<TripDayRow, 'id'> & { id?: string };
 export type InsertStop =
-  Omit<StopRow, 'id' | 'created_at' | 'updated_at' | 'like_count' | 'comment_count' | 'feed_eligible' | 'category' | 'status' | 'sort_order'>
-  & { id?: string; category?: StopCategory; status?: StopStatus; sort_order?: number };
+  Omit<StopRow, 'id' | 'created_at' | 'updated_at' | 'like_count' | 'comment_count' | 'feed_eligible' | 'category' | 'status' | 'sort_order' | 'scope' | 'assignees' | 'paid_by'>
+  & { id?: string; category?: StopCategory; status?: StopStatus; sort_order?: number; scope?: StopScope; assignee_ids?: string[]; paid_by?: string };
 export type InsertMedia = Omit<MediaRow, 'id' | 'created_at'> & { id?: string };
 export type InsertComment = Omit<CommentRow, 'id' | 'created_at'> & { id?: string };
 export type InsertBooking = Omit<BookingRow, 'id' | 'created_at'> & { id?: string };
 
 // ── Composite / joined types (used in UI) ────────────────────
 
-type AuthorLite = Pick<UserRow, 'id' | 'username' | 'display_name' | 'avatar_url'>;
+export type AuthorLite = Pick<UserRow, 'id' | 'username' | 'display_name' | 'avatar_url'>;
 
 export interface StopWithMedia extends StopRow {
   media: MediaRow[];
@@ -302,11 +371,19 @@ export interface CommentItem {
   author: AuthorLite;
 }
 
+export interface TripMessageItem {
+  id: string;
+  trip_id: string;
+  body: string;
+  created_at: string;
+  author: AuthorLite;
+}
+
 // ── Album (derived view of a trip's visited media) ───────────
 
 export interface AlbumItem {
   media_id: string;
-  stop_id: string;
+  stop_id: string | null;
   type: MediaType;
   url: string;
   cdn_url: string | null;
@@ -345,7 +422,31 @@ export interface NotificationItem {
   read: boolean;
   created_at: string;
   actor: AuthorLite | null;
-  trip: { id: string; title: string } | null;
+  trip: { id: string; title: string; stage: string | null } | null;
   stop_id: string | null;
   batch_id: string | null;
+}
+
+// ── Search ───────────────────────────────────────────────────
+
+export interface UserSearchResult {
+  id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  follower_count: number;
+}
+
+export interface TripSearchResult {
+  id: string;
+  title: string;
+  destination: string | null;
+  cover_image_url: string | null;
+  stage: 'planning' | 'living' | 'album';
+  author: AuthorLite;
+}
+
+export interface SearchResults {
+  users: UserSearchResult[];
+  trips: TripSearchResult[];
 }

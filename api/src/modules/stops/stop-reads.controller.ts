@@ -30,6 +30,16 @@ export class StopReadsController {
     return this.stops.getUserPosts(userId ?? null, id);
   }
 
+  // A user's visited + planned stops for their profile map.
+  @PublicRead()
+  @Get('users/:id/map-stops')
+  userMapStops(
+    @CurrentUser() userId: string | undefined,
+    @Param('id') id: string,
+  ): Promise<StopWithMedia[]> {
+    return this.stops.getUserMapStops(userId ?? null, id);
+  }
+
   // Home feed: visited stops from people you follow (auth required).
   @Get('feed/stops')
   feed(

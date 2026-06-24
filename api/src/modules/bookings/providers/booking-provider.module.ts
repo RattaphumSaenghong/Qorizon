@@ -1,20 +1,27 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BOOKING_PROVIDER } from './booking-provider';
-import { MockBookingProvider } from './mock.provider';
-import { AmadeusBookingProvider } from './amadeus.provider';
+import { FLIGHT_PROVIDER, HOTEL_PROVIDER } from './booking-provider';
+import { DuffelFlightProvider } from './duffel.provider';
+import { LiteApiHotelProvider } from './liteapi.provider';
+import { MockFlightProvider, MockHotelProvider } from './mock.provider';
 
 @Module({
   providers: [
     {
-      provide: BOOKING_PROVIDER,
+      provide: FLIGHT_PROVIDER,
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
-        const hasAmadeus = config.get('AMADEUS_CLIENT_ID') && config.get('AMADEUS_CLIENT_SECRET');
-        return hasAmadeus ? new AmadeusBookingProvider(config) : new MockBookingProvider();
+        return config.get('DUFFEL_API_KEY') ? new DuffelFlightProvider(config) : new MockFlightProvider();
+      },
+    },
+    {
+      provide: HOTEL_PROVIDER,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        return config.get('LITEAPI_KEY') ? new LiteApiHotelProvider(config) : new MockHotelProvider();
       },
     },
   ],
-  exports: [BOOKING_PROVIDER],
+  exports: [FLIGHT_PROVIDER, HOTEL_PROVIDER],
 })
 export class BookingProviderModule {}

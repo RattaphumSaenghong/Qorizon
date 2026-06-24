@@ -1,14 +1,7 @@
 /**
  * User Profile
- * ┌─────────────────────────────────────────────────────┐
- * │  Avatar  Name / handle / bio / stats / follow btn   │
- * ├──────────────────────────────────────────────────────┤
- * │  [Posts]  [Albums]  [Map]                            │
- * ├──────────────────────────────────────────────────────┤
- * │  tab content                                         │
- * └──────────────────────────────────────────────────────┘
  */
-import React, { useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -25,6 +18,7 @@ import {
   useUserByUsername,
   useUserTrips,
   useUserPosts,
+  useUserMapStops,
   useIsFollowing,
   useToggleFollow,
   useUpdateUser,
@@ -37,30 +31,16 @@ import { Btn } from '../../src/components/Btn';
 import { Chip } from '../../src/components/Chip';
 import { CoverImage } from '../../src/components/CoverImage';
 import { MapView } from '../../src/components/MapView';
+import { PressableScale } from '../../src/components/PressableScale';
+import { TripSettingsMenu } from '../../src/components/TripSettingsMenu';
 import { useAuthStore } from '../../src/stores/authStore';
 import { signOut } from '../../src/lib/auth';
+import { useResponsive } from '../../src/hooks/useResponsive';
 
-// Travel pins — placeholder world-map markers (visited-city aggregation is a follow-up)
-const TRAVEL_PINS = [
-  { id: 'bkk',  lat: 13.7563,  lon: 100.5018, label: '🇹🇭' },
-  { id: 'cmi',  lat: 18.7883,  lon: 98.9817,  label: '🇹🇭' },
-  { id: 'tyo',  lat: 35.6762,  lon: 139.6503, label: '🇯🇵' },
-  { id: 'kix',  lat: 34.6937,  lon: 135.5023, label: '🇯🇵' },
-  { id: 'kte',  lat: 35.0116,  lon: 135.7681, label: '🇯🇵' },
-  { id: 'bali', lat: -8.3405,  lon: 115.0920, label: '🇮🇩' },
-  { id: 'sin',  lat: 1.3521,   lon: 103.8198, label: '🇸🇬' },
-  { id: 'hkg',  lat: 22.3193,  lon: 114.1694, label: '🇭🇰' },
-  { id: 'sel',  lat: 3.1390,   lon: 101.6869, label: '🇲🇾' },
-  { id: 'hnm',  lat: 21.0285,  lon: 105.8542, label: '🇻🇳' },
-  { id: 'cmb',  lat: 6.9271,   lon: 79.8612,  label: '🇱🇰' },
-  { id: 'dxb',  lat: 25.2048,  lon: 55.2708,  label: '🇦🇪' },
-  { id: 'lhr',  lat: 51.5074,  lon: -0.1278,  label: '🇬🇧' },
-  { id: 'cdg',  lat: 48.8566,  lon: 2.3522,   label: '🇫🇷' },
-];
 
 type Tab = 'Posts' | 'Trips' | 'Map';
 
-// ── Bio header ───────────────────────────────────────────────
+// Bio header
 function ProfileHeader({
   profile,
   isOwn,
@@ -69,6 +49,7 @@ function ProfileHeader({
   onToggleFollow,
   onEditProfile,
   postsCount,
+  isPhone,
 }: {
   profile: UserRow;
   isOwn: boolean;
@@ -77,19 +58,19 @@ function ProfileHeader({
   onToggleFollow: () => void;
   onEditProfile: () => void;
   postsCount: number;
+  isPhone: boolean;
 }) {
   return (
-    <View style={styles.header}>
-      <Avatar size={88} ring imageUri={profile.avatar_url} />
+    <View style={[styles.header, isPhone && styles.headerPhone]}>
+      <Avatar size={isPhone ? 72 : 88} ring imageUri={profile.avatar_url} />
 
-      <View style={styles.headerMeta}>
-        {/* name + actions */}
-        <View style={styles.nameRow}>
-          <View>
+      <View style={[styles.headerMeta, isPhone && styles.headerMetaPhone]}>
+        <View style={[styles.nameRow, isPhone && styles.nameRowPhone]}>
+          <View style={isPhone && styles.nameCentered}>
             <Text style={styles.displayName}>{profile.display_name ?? profile.username}</Text>
             <Text style={styles.handle}>@{profile.username}</Text>
           </View>
-          <View style={styles.headerActions}>
+          <View style={[styles.headerActions, isPhone && styles.headerActionsPhone]}>
             {isOwn ? (
               <>
                 <Btn sm onPress={onEditProfile}>Edit profile</Btn>
@@ -97,12 +78,7 @@ function ProfileHeader({
               </>
             ) : (
               <>
-                <Btn
-                  solid={!isFollowing}
-                  sm
-                  onPress={onToggleFollow}
-                  style={isFollowing ? styles.followingBtn : undefined}
-                >
+                <Btn solid={!isFollowing} sm onPress={onToggleFollow} style={isFollowing ? styles.followingBtn : undefined}>
                   {isFollowing ? 'Following' : 'Follow'}
                 </Btn>
                 <Btn sm>Message</Btn>
@@ -111,8 +87,7 @@ function ProfileHeader({
           </View>
         </View>
 
-        {/* stats */}
-        <View style={styles.stats}>
+        <View style={[styles.stats, isPhone && styles.statsPhone]}>
           <StatPill value={postsCount} label="posts" />
           <View style={styles.statDivider} />
           <StatPill value={profile.follower_count.toLocaleString()} label="followers" />
@@ -120,8 +95,7 @@ function ProfileHeader({
           <StatPill value={profile.following_count} label="following" />
         </View>
 
-        {/* bio */}
-        {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
+        {profile.bio ? <Text style={[styles.bio, isPhone && styles.bioCentered]}>{profile.bio}</Text> : null}
       </View>
     </View>
   );
@@ -136,7 +110,7 @@ function StatPill({ value, label }: { value: string | number; label: string }) {
   );
 }
 
-// ── Tab bar ──────────────────────────────────────────────────
+  // Tab bar
 function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   const tabs: Tab[] = ['Posts', 'Trips', 'Map'];
   return (
@@ -148,7 +122,7 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
           onPress={() => onChange(t)}
         >
           <Text style={[styles.tabLabel, active === t && styles.tabLabelActive]}>
-            {t === 'Posts' ? '⊞  Posts' : t === 'Trips' ? '✈  Trips' : '◎  Map'}
+            {t === 'Posts' ? 'Posts' : t === 'Trips' ? 'Trips' : 'Map'}
           </Text>
         </TouchableOpacity>
       ))}
@@ -156,7 +130,7 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
   );
 }
 
-// ── Posts grid ───────────────────────────────────────────────
+  // Posts grid
 function PostsGrid({ posts, onPress }: { posts: StopWithMedia[]; onPress: (tripId: string) => void }) {
   if (posts.length === 0) {
     return (
@@ -180,7 +154,7 @@ function PostsGrid({ posts, onPress }: { posts: StopWithMedia[]; onPress: (tripI
             </View>
             {p.media && p.media.length > 1 && (
               <View style={styles.multiTag}>
-                <Text style={styles.multiTagText}>⊞</Text>
+                <Text style={styles.multiTagText}>+</Text>
               </View>
             )}
           </Pressable>
@@ -190,17 +164,27 @@ function PostsGrid({ posts, onPress }: { posts: StopWithMedia[]; onPress: (tripI
   );
 }
 
-// ── Trips grid ───────────────────────────────────────────────
+  // Trips grid
 type TripMode = 'story' | 'plan';
 
 function TripCard({
   trip,
   onOpen,
+  isPhone,
+  isOwn,
+  onOpenMenu,
 }: {
   trip: TripWithAuthor;
-  onOpen: (id: string, mode: TripMode) => void;
+  onOpen: (trip: TripWithAuthor, mode: TripMode) => void;
+  isPhone?: boolean;
+  isOwn?: boolean;
+  onOpenMenu?: (trip: TripWithAuthor) => void;
 }) {
-  const [mode, setMode] = useState<TripMode>('story');
+  // Own trips: drafts open the planner; active/finished trips open their view
+  // (Story → journal, or the album once finished). Others' always default to Story.
+  const [mode, setMode] = useState<TripMode>(
+    isOwn && trip.stage === 'planning' ? 'plan' : 'story',
+  );
 
   const statusColor = trip.status === 'active'
     ? colors.acc
@@ -209,15 +193,17 @@ function TripCard({
     : colors.line;
 
   const statusLabel = trip.status === 'active'
-    ? '● LIVE'
+    ? 'LIVE'
     : trip.status === 'draft'
     ? 'Draft'
+    : trip.status === 'archived'
+    ? 'Archived'
     : 'completed';
 
   return (
     <TouchableOpacity
-      style={styles.tripCard}
-      onPress={() => onOpen(trip.id, mode)}
+      style={[styles.tripCard, isPhone && styles.tripCardPhone]}
+      onPress={() => onOpen(trip, mode)}
       activeOpacity={0.88}
     >
       {/* cover */}
@@ -237,7 +223,18 @@ function TripCard({
           </View>
         )}
 
-        {/* Plan ↔ Story toggle — sits bottom of cover */}
+        {/* Owner settings (⋯) */}
+        {isOwn && (
+          <PressableScale
+            onPress={() => onOpenMenu?.(trip)}
+            style={styles.cardMenuBtn}
+            accessibilityLabel="Trip settings"
+          >
+            <Text style={styles.cardMenuText}>⋯</Text>
+          </PressableScale>
+        )}
+
+        {/* Plan / Story toggle - sits bottom of cover */}
         <View style={styles.modeToggle}>
           <TouchableOpacity
             style={[styles.modeBtn, mode === 'story' && styles.modeBtnActive]}
@@ -264,7 +261,7 @@ function TripCard({
         <View style={styles.tripFooter}>
           <Text style={[styles.tripStatus, { color: statusColor }]}>{statusLabel}</Text>
           {trip.fork_count > 0 && (
-            <Text style={styles.tripForks}>⑂ {trip.fork_count}</Text>
+            <Text style={styles.tripForks}>Forks {trip.fork_count}</Text>
           )}
         </View>
       </View>
@@ -272,75 +269,166 @@ function TripCard({
   );
 }
 
-function TripsGrid({ trips, onOpen }: { trips: TripWithAuthor[]; onOpen: (id: string, mode: TripMode) => void }) {
+function TripsGrid({
+  trips,
+  onOpen,
+  isPhone,
+  isOwn,
+  showArchived,
+  onToggleArchived,
+}: {
+  trips: TripWithAuthor[];
+  onOpen: (trip: TripWithAuthor, mode: TripMode) => void;
+  isPhone?: boolean;
+  isOwn?: boolean;
+  showArchived?: boolean;
+  onToggleArchived?: () => void;
+}) {
+  const [menuTrip, setMenuTrip] = useState<TripWithAuthor | null>(null);
+
+  const archivedToggle = isOwn ? (
+    <View style={styles.tripsToolbar}>
+      <PressableScale onPress={onToggleArchived} style={styles.archivedToggle}>
+        <Text style={styles.archivedToggleText}>
+          {showArchived ? '✓ Showing archived' : 'Show archived'}
+        </Text>
+      </PressableScale>
+    </View>
+  ) : null;
+
   if (trips.length === 0) {
     return (
-      <View style={styles.empty}>
-        <Text style={styles.emptyText}>No trips yet.</Text>
+      <View>
+        {archivedToggle}
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>{showArchived ? 'No archived trips.' : 'No trips yet.'}</Text>
+        </View>
       </View>
     );
   }
   return (
-    <ScrollView contentContainerStyle={styles.tripsGrid}>
-      {trips.map((t) => (
-        <TripCard key={t.id} trip={t} onOpen={onOpen} />
-      ))}
-    </ScrollView>
-  );
-}
-
-// ── Travel map ───────────────────────────────────────────────
-function TravelMap() {
-  const [selectedPin, setSelectedPin] = useState<string | null>(null);
-
-  // Convert real lat/lng to approximate percentage positions on a
-  // world-centered static map (zoom ~2, center 60°E, 20°N).
-  // Pins are overlay elements — they're approximate on the static tile
-  // but will be geographically accurate once we swap in the interactive SDK.
-  const PIN_POSITIONS: Record<string, { x: `${number}%`; y: `${number}%` }> = {
-    bkk:  { x: '72%', y: '52%' }, cmi:  { x: '71%', y: '47%' },
-    tyo:  { x: '80%', y: '40%' }, kix:  { x: '79%', y: '42%' },
-    kte:  { x: '78%', y: '42%' }, bali: { x: '75%', y: '62%' },
-    sin:  { x: '74%', y: '58%' }, hkg:  { x: '77%', y: '48%' },
-    sel:  { x: '73%', y: '55%' }, hnm:  { x: '76%', y: '50%' },
-    cmb:  { x: '68%', y: '58%' }, dxb:  { x: '60%', y: '46%' },
-    lhr:  { x: '42%', y: '30%' }, cdg:  { x: '44%', y: '31%' },
-  };
-
-  return (
-    <View style={styles.mapContainer}>
-      <MapView
-        initialLongitude={80}
-        initialLatitude={20}
-        initialZoom={2}
-        style={styles.travelMap}
-      >
-        {TRAVEL_PINS.map((pin) => {
-          const pos = PIN_POSITIONS[pin.id];
-          if (!pos) return null;
-          return (
-            <TouchableOpacity
-              key={pin.id}
-              style={[styles.travelPin, { left: pos.x, top: pos.y }]}
-              onPress={() => setSelectedPin(selectedPin === pin.id ? null : pin.id)}
-            >
-              <Text style={styles.travelPinEmoji}>{pin.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </MapView>
-
-      {/* Stats overlay */}
-      <View style={styles.mapStats}>
-        <Text style={styles.mapStatsText}>14 countries · 38 cities</Text>
-      </View>
+    <View>
+      {archivedToggle}
+      <ScrollView contentContainerStyle={[styles.tripsGrid, isPhone && styles.tripsGridPhone]}>
+        {trips.map((t) => (
+          <TripCard key={t.id} trip={t} onOpen={onOpen} isPhone={isPhone} isOwn={isOwn} onOpenMenu={setMenuTrip} />
+        ))}
+      </ScrollView>
+      <TripSettingsMenu visible={!!menuTrip} trip={menuTrip} onClose={() => setMenuTrip(null)} />
     </View>
   );
 }
 
-// ── Main screen ──────────────────────────────────────────────
+  // Travel map
+function TravelMap({
+  stops,
+  isOwn,
+  onOpenTrip,
+}: {
+  stops: StopWithMedia[];
+  isOwn: boolean;
+  onOpenTrip: (tripId: string) => void;
+}) {
+  const [hoveredTripId, setHoveredTripId] = useState<string | null>(null);
+  const pins = useMemo(
+    () =>
+      stops
+        .filter((stop) => stop.latitude != null && stop.longitude != null)
+        .map((stop) => ({
+          id: stop.id,
+          latitude: stop.latitude as number,
+          longitude: stop.longitude as number,
+          location: stop.location_name ?? (stop.status === 'planned' ? 'Planned stop' : 'Visited stop'),
+          caption: stop.notes ?? stop.caption ?? '',
+          photoUrl: stop.status === 'visited' ? stop.media[0]?.cdn_url ?? stop.media[0]?.url : undefined,
+          markerKind: stop.status === 'planned' ? ('planned' as const) : ('visited' as const),
+          tripId: stop.trip_id,
+          onPress: () => onOpenTrip(stop.trip_id),
+        })),
+    [stops, onOpenTrip],
+  );
+
+  const mapCenter = useMemo(() => {
+    if (pins.length === 0) return { latitude: 20, longitude: 80, zoom: 2 };
+
+    const latitudes = pins.map((pin) => pin.latitude);
+    const longitudes = pins.map((pin) => pin.longitude);
+    const latitude = latitudes.reduce((sum, value) => sum + value, 0) / latitudes.length;
+    const longitude = longitudes.reduce((sum, value) => sum + value, 0) / longitudes.length;
+    const spread = Math.max(
+      Math.max(...latitudes) - Math.min(...latitudes),
+      Math.max(...longitudes) - Math.min(...longitudes),
+    );
+    const zoom = spread > 90 ? 2 : spread > 35 ? 3 : spread > 12 ? 4 : spread > 4 ? 6 : 10;
+
+    return { latitude, longitude, zoom };
+  }, [pins]);
+
+  const visitedPlaces = pins.filter((pin) => pin.markerKind === 'visited').length;
+  const tripCount = new Set(pins.map((pin) => pin.tripId)).size;
+  const hoveredTrail = useMemo(
+    () =>
+      hoveredTripId
+        ? stops
+            .filter((stop) => stop.trip_id === hoveredTripId && stop.latitude != null && stop.longitude != null)
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map((stop) => [stop.longitude as number, stop.latitude as number] as [number, number])
+        : [],
+    [hoveredTripId, stops],
+  );
+  const handleHoverPost = useCallback(
+    (id: string | null) => {
+      const pin = id ? pins.find((item) => item.id === id) : null;
+      setHoveredTripId(pin?.tripId ?? null);
+    },
+    [pins],
+  );
+  const handleSelectPost = useCallback(
+    (id: string) => {
+      const pin = pins.find((item) => item.id === id);
+      pin?.onPress();
+    },
+    [pins],
+  );
+
+  return (
+    <View style={styles.mapContainer}>
+      <MapView
+        initialLongitude={mapCenter.longitude}
+        initialLatitude={mapCenter.latitude}
+        initialZoom={mapCenter.zoom}
+        center={pins.length ? { latitude: mapCenter.latitude, longitude: mapCenter.longitude } : null}
+        posts={pins}
+        trail={hoveredTrail.length >= 2 ? hoveredTrail : []}
+        onHoverPost={handleHoverPost}
+        onSelectPost={handleSelectPost}
+        style={styles.travelMap}
+      />
+
+      {pins.length === 0 ? (
+        <View style={styles.mapEmpty}>
+          <Text style={styles.mapEmptyText}>
+            {isOwn
+              ? 'No places pinned yet - your visited stops will appear here.'
+              : "Hasn't shared any places yet."}
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.mapStats}>
+          <Text style={styles.mapStatsText}>
+            {visitedPlaces} place{visitedPlaces === 1 ? '' : 's'} {'\u00b7'} {tripCount} trip
+            {tripCount === 1 ? '' : 's'}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// Main screen
 export default function ProfileScreen() {
   const router = useRouter();
+  const { isPhone } = useResponsive();
   const { username } = useLocalSearchParams<{ username: string }>();
   const currentUser = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
@@ -357,8 +445,10 @@ export default function ProfileScreen() {
   const byUsername = useUserByUsername(isOwn ? '' : (username ?? ''));
   const profile: UserRow | null | undefined = isOwn ? currentUser : byUsername.data;
 
-  const tripsQ = useUserTrips(profile?.id ?? '');
+  const [showArchived, setShowArchived] = useState(false);
+  const tripsQ = useUserTrips(profile?.id ?? '', isOwn && showArchived);
   const postsQ = useUserPosts(profile?.id ?? '');
+  const mapStopsQ = useUserMapStops(profile?.id ?? '');
   const followingQ = useIsFollowing(currentUser?.id ?? '', !isOwn && profile ? profile.id : '');
   const toggleFollow = useToggleFollow(currentUser?.id ?? '');
   const updateUser = useUpdateUser(profile?.id ?? '');
@@ -430,6 +520,7 @@ export default function ProfileScreen() {
             onToggleFollow={handleToggleFollow}
             onEditProfile={openEdit}
             postsCount={postsQ.data?.length ?? 0}
+            isPhone={isPhone}
           />
           <TabBar active={activeTab} onChange={setActiveTab} />
 
@@ -440,14 +531,24 @@ export default function ProfileScreen() {
             {activeTab === 'Trips' && (
               <TripsGrid
                 trips={tripsQ.data ?? []}
-                onOpen={(id, mode) =>
-                  mode === 'story'
-                    ? router.push(`/journal/${id}`)
-                    : router.push(`/builder/${id}`)
-                }
+                isPhone={isPhone}
+                isOwn={isOwn}
+                showArchived={showArchived}
+                onToggleArchived={() => setShowArchived((v) => !v)}
+                onOpen={(t, mode) => {
+                  if (mode === 'plan') router.push(`/builder/${t.id}`);
+                  else if (t.stage === 'album') router.push(`/album/${t.id}`);
+                  else router.push(`/journal/${t.id}`);
+                }}
               />
             )}
-            {activeTab === 'Map' && <TravelMap />}
+            {activeTab === 'Map' && (
+              <TravelMap
+                stops={mapStopsQ.data ?? []}
+                isOwn={isOwn}
+                onOpenTrip={(tripId) => router.push(`/journal/${tripId}`)}
+              />
+            )}
           </View>
         </View>
       </View>
@@ -465,11 +566,11 @@ export default function ProfileScreen() {
             <TextInput style={[styles.input, styles.inputMulti]} value={edBio} onChangeText={setEdBio} placeholder="A line about you" placeholderTextColor={colors.sub} multiline />
 
             <Text style={styles.modalLabel}>Avatar URL</Text>
-            <TextInput style={styles.input} value={edAvatar} onChangeText={setEdAvatar} placeholder="https://…" placeholderTextColor={colors.sub} autoCapitalize="none" />
+            <TextInput style={styles.input} value={edAvatar} onChangeText={setEdAvatar} placeholder="https://..." placeholderTextColor={colors.sub} autoCapitalize="none" />
 
             <View style={styles.modalActions}>
               <Btn sm onPress={() => setEditOpen(false)}>Cancel</Btn>
-              <Btn solid sm onPress={saveProfile}>{updateUser.isPending ? 'Saving…' : 'Save'}</Btn>
+              <Btn solid sm onPress={saveProfile}>{updateUser.isPending ? 'Saving...' : 'Save'}</Btn>
             </View>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -493,7 +594,7 @@ const styles = StyleSheet.create({
   inputMulti: { minHeight: 64, textAlignVertical: 'top' },
   modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing.md, marginTop: spacing.lg },
 
-  // ── Header ──
+  // Header
   header: {
     flexDirection: 'row',
     gap: spacing.xl,
@@ -503,15 +604,26 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
     flexShrink: 0,
   },
+  headerPhone: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.lg,
+    paddingBottom: spacing.md,
+  },
   headerMeta: { flex: 1, gap: spacing.md },
+  headerMetaPhone: { flex: undefined, width: '100%', alignItems: 'center', gap: spacing.sm },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
   },
+  nameRowPhone: { flexDirection: 'column', alignItems: 'center', gap: spacing.sm },
+  nameCentered: { alignItems: 'center' },
   displayName: { fontSize: fontSize.xl, fontWeight: '800', color: colors.ink },
   handle: { fontSize: fontSize.md, color: colors.sub, marginTop: 2 },
   headerActions: { flexDirection: 'row', gap: spacing.sm },
+  headerActionsPhone: { justifyContent: 'center' },
   followingBtn: { opacity: 0.7 },
 
   stats: {
@@ -519,6 +631,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.lg,
   },
+  statsPhone: { justifyContent: 'center' },
   stat: { alignItems: 'center', gap: 2 },
   statValue: { fontSize: fontSize.lg, fontWeight: '800', color: colors.ink },
   statLabel: { fontSize: fontSize.xs, color: colors.sub, textTransform: 'uppercase', letterSpacing: 0.5 },
@@ -529,8 +642,9 @@ const styles = StyleSheet.create({
     color: colors.ink,
     lineHeight: 22,
   },
+  bioCentered: { textAlign: 'center' },
 
-  // ── Tab bar ──
+// Tab bar
   tabBar: {
     flexDirection: 'row',
     borderBottomWidth: 1,
@@ -559,7 +673,7 @@ const styles = StyleSheet.create({
 
   tabContent: { flex: 1, overflow: 'hidden' },
 
-  // ── Posts grid ──
+// Posts grid
   postsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -608,13 +722,28 @@ const styles = StyleSheet.create({
   },
   multiTagText: { fontSize: 10, color: colors.white },
 
-  // ── Trips grid ──
+// Trips grid
   tripsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.md,
     padding: spacing.lg,
   },
+  tripsGridPhone: { padding: spacing.md, gap: spacing.sm },
+  tripsToolbar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+  },
+  archivedToggle: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  archivedToggleText: { fontSize: fontSize.xs, color: colors.sub, fontWeight: '600' },
   tripCard: {
     width: '30%',
     borderRadius: radius.md,
@@ -623,6 +752,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     backgroundColor: colors.paper,
   },
+  tripCardPhone: { width: '46%' },
   tripCover: {
     height: 150,
     backgroundColor: colors.panel,
@@ -646,8 +776,20 @@ const styles = StyleSheet.create({
   },
   livePillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.white },
   livePillText: { fontSize: fontSize.xs, color: colors.white, fontWeight: '700' },
+  cardMenuBtn: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(44,42,38,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardMenuText: { fontSize: 18, color: colors.white, fontWeight: '700', lineHeight: 20 },
 
-  // Plan ↔ Story toggle
+  // Plan / Story toggle
   modeToggle: {
     position: 'absolute',
     bottom: 8,
@@ -684,27 +826,9 @@ const styles = StyleSheet.create({
   tripForks: { fontSize: fontSize.xs, color: colors.sub },
   tripPhotos: { fontSize: fontSize.xs, color: colors.sub },
 
-  // ── Travel map ──
+// Travel map
   mapContainer: { flex: 1, position: 'relative' },
   travelMap: { flex: 1 },
-  travelPin: {
-    position: 'absolute',
-    transform: [{ translateX: '-50%' }, { translateY: '-50%' }],
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.paper,
-    borderWidth: 1.5,
-    borderColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  travelPinEmoji: { fontSize: 14 },
   mapStats: {
     position: 'absolute',
     top: 16,
@@ -722,4 +846,23 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   mapStatsText: { fontSize: fontSize.md, fontWeight: '600', color: colors.ink },
+  mapEmpty: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 16,
+    backgroundColor: colors.paper,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  mapEmptyText: { fontSize: fontSize.md, color: colors.sub, textAlign: 'center' },
 });

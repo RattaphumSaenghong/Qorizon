@@ -27,9 +27,10 @@ export async function postTrailPoints(
   return request<{ inserted: number }>('POST', `/trips/${tripId}/trail`, { points });
 }
 
-/** Read a trip's GPS trail (ordered). */
-export async function fetchTrail(tripId: string): Promise<TrailPointRow[]> {
-  return request<TrailPointRow[]>('GET', `/trips/${tripId}/trail`);
+/** Read a trip's GPS trail (ordered). Pass `member` for one person's trail. */
+export async function fetchTrail(tripId: string, member?: string | null): Promise<TrailPointRow[]> {
+  const qs = member ? `?member=${encodeURIComponent(member)}` : '';
+  return request<TrailPointRow[]>('GET', `/trips/${tripId}/trail${qs}`);
 }
 
 /** Publish a live batch (owner) — groups stops + notifies followers. */

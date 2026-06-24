@@ -1,11 +1,13 @@
 export const BOOKING_TYPE = ['flight', 'hotel'] as const;
 export type BookingType = (typeof BOOKING_TYPE)[number];
 
-export const BOOKING_PROVIDER = ['amadeus', 'agoda', 'booking_com', 'mock'] as const;
+export const BOOKING_PROVIDER = ['duffel', 'liteapi', 'email', 'mock'] as const;
 export type BookingProvider = (typeof BOOKING_PROVIDER)[number];
 
 export const BOOKING_STATUS = ['pending', 'confirmed', 'cancelled'] as const;
 export type BookingStatus = (typeof BOOKING_STATUS)[number];
+export const INVENTORY_STATUS = ['unmatched', 'matched', 'dismissed'] as const;
+export type InventoryStatus = (typeof INVENTORY_STATUS)[number];
 
 /** A bookable offer returned from a provider search (not persisted until booked). */
 export interface BookingOffer {
@@ -17,6 +19,7 @@ export interface BookingOffer {
   amount_thb: number;
   latitude?: number;
   longitude?: number;
+  rating?: number; // provider review score (hotels); scale is provider-defined (~0–10)
   meta?: Record<string, unknown>;
 }
 
@@ -41,6 +44,32 @@ export interface CreateBookingRequest {
   amount_thb: number;
   title?: string;
   meta?: Record<string, unknown>;
+  assignee_ids?: string[];
+  passenger_details?: PassengerDetails;
+  guest_details?: GuestDetails;
+}
+
+export interface PassengerDetails {
+  title?: string;
+  given_name: string;
+  family_name: string;
+  born_on?: string;
+  gender?: string;
+  email?: string;
+  phone_number?: string;
+}
+
+export interface GuestDetails {
+  given_name: string;
+  family_name: string;
+  email?: string;
+  phone_number?: string;
+}
+
+export interface BookingConfirmation {
+  external_ref: string;
+  status?: BookingStatus;
+  raw?: Record<string, unknown>;
 }
 
 export interface BookingRow {
@@ -55,4 +84,15 @@ export interface BookingRow {
   commission_thb: number | null;
   title: string | null; // surfaced from raw_payload for display
   created_at: string;
+}
+
+export interface InventoryItemRow {
+  id: string;
+  user_id: string;
+  source: string;
+  type: BookingType;
+  parsed: Record<string, unknown>;
+  status: InventoryStatus;
+  matched_stop_id: string | null;
+  received_at: string;
 }

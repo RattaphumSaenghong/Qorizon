@@ -34,6 +34,22 @@ export class PolicyService {
     return !!trip && trip.user_id === userId;
   }
 
+  /** Owner OR an accepted collaborator — may contribute their own memory
+   *  (trail points, their own album overrides) to a shared trip. */
+  async canEditTrip(userId: string, tripId: string): Promise<boolean> {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      select: { user_id: true },
+    });
+    if (!trip) return false;
+    if (trip.user_id === userId) return true;
+    const member = await this.prisma.tripMember.findUnique({
+      where: { trip_id_user_id: { trip_id: tripId, user_id: userId } },
+      select: { status: true },
+    });
+    return member?.status === 'accepted';
+  }
+
   async isFollowing(followerId: string, followingId: string): Promise<boolean> {
     const row = await this.prisma.follow.findUnique({
       where: { follower_id_following_id: { follower_id: followerId, following_id: followingId } },
@@ -58,5 +74,15 @@ export class PolicyService {
     });
     if (!trip) throw new NotFoundException('trip not found');
     if (trip.user_id !== userId) throw new ForbiddenException('not your trip');
+  }
+
+  /** 404 if missing/unreadable, 403 if not owner or an accepted member. */
+  async assertCanEditTrip(userId: string, tripId: string): Promise<void> {
+    if (!(await this.canReadTrip(userId, tripId))) {
+      throw new NotFoundException('trip not found');
+    }
+    if (!(await this.canEditTrip(userId, tripId))) {
+      throw new ForbiddenException('not a member of this trip');
+    }
   }
 }

@@ -14,7 +14,7 @@ export class NotificationsService {
       where: { user_id: userId },
       include: {
         actor: { select: ACTOR_SELECT },
-        trip: { select: { id: true, title: true } },
+        trip: { select: { id: true, title: true, stage: true } },
       },
       orderBy: { created_at: 'desc' },
       take: limit,
@@ -33,7 +33,7 @@ export class NotificationsService {
             avatar_url: n.actor.avatar_url,
           }
         : null,
-      trip: n.trip ? { id: n.trip.id, title: n.trip.title } : null,
+      trip: n.trip ? { id: n.trip.id, title: n.trip.title, stage: n.trip.stage } : null,
       stop_id: n.stop_id,
       batch_id: n.batch_id,
     }));

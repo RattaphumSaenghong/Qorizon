@@ -33,7 +33,7 @@ export class LiveService {
 
   /** Append GPS trail points, then recompute the feed gate (new trail may let a stop pass the 1km rule). */
   async addTrail(userId: string, tripId: string, dto: PostTrailDto): Promise<{ inserted: number }> {
-    await this.policy.assertOwnsTrip(userId, tripId);
+    await this.policy.assertCanEditTrip(userId, tripId);
     await this.prisma.trailPoint.createMany({
       data: dto.points.map((p) => ({
         trip_id: tripId,
@@ -48,10 +48,10 @@ export class LiveService {
     return { inserted: dto.points.length };
   }
 
-  async getTrail(userId: string | null, tripId: string): Promise<TrailPointRow[]> {
+  async getTrail(userId: string | null, tripId: string, member?: string | null): Promise<TrailPointRow[]> {
     await this.policy.assertCanReadTrip(userId, tripId);
     const points = await this.prisma.trailPoint.findMany({
-      where: { trip_id: tripId },
+      where: { trip_id: tripId, ...(member ? { user_id: member } : {}) },
       orderBy: { recorded_at: 'asc' },
     });
     return points.map(toTrailPointRow);

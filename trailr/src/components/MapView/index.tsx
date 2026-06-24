@@ -24,6 +24,9 @@ interface PostPin {
   caption: string;
   hasVideo?: boolean;
   photoUrl?: string;
+  /** 1-based order label, drawn inside the pin (builder route sequence). */
+  index?: number;
+  markerKind?: 'visited' | 'planned';
   onPress?: () => void;
 }
 
@@ -41,6 +44,7 @@ interface MapViewProps {
   activeId?: string | null;
   /** Pin select callback — used by interactive web map; ignored by static fallback */
   onSelectPost?: (id: string) => void;
+  onHoverPost?: (id: string | null) => void;
   /** Visible-bounds callback — used by interactive web map; ignored by static fallback */
   onBoundsChange?: (b: { west: number; south: number; east: number; north: number }) => void;
   /** Recenter target — used by interactive web map; ignored by static fallback */

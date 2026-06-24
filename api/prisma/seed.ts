@@ -23,6 +23,7 @@ const USERS = [
 const JAPAN = 'aaaa0001-0000-0000-0000-000000000001';
 const CHIANGMAI = 'aaaa0002-0000-0000-0000-000000000002';
 const RAMEN = 'aaaa0003-0000-0000-0000-000000000003';
+const OSAKA = 'aaaa0004-0000-0000-0000-000000000004'; // collaborative (somchai + wanwisa)
 
 type SeedStop = {
   category: string;
@@ -104,6 +105,7 @@ async function seedTrip(opts: {
             // real, loadable demo images (deterministic per media)
             const photo = `https://picsum.photos/seed/${stop.id.slice(0, 8)}-${j}/800/600`;
             return {
+              trip_id: opts.id,
               stop_id: stop.id,
               user_id: opts.userId,
               type: 'photo',
@@ -118,9 +120,100 @@ async function seedTrip(opts: {
   }
 }
 
+/**
+ * A collaborative planning trip (somchai owner + wanwisa accepted member) that
+ * exercises block scope (assigned stops), budget "Your Share", settle-up
+ * (mixed payers), and the photo pool (shared + private, two uploaders).
+ */
+async function seedCollabTrip() {
+  // idempotent reset
+  await prisma.media.deleteMany({ where: { trip_id: OSAKA } });
+  await prisma.stop.deleteMany({ where: { trip_id: OSAKA } });
+  await prisma.tripDay.deleteMany({ where: { trip_id: OSAKA } });
+  await prisma.tripMember.deleteMany({ where: { trip_id: OSAKA } });
+  await prisma.tripMessage.deleteMany({ where: { trip_id: OSAKA } });
+
+  const tripFields = {
+    title: 'Osaka Weekend',
+    destination: 'Osaka',
+    visibility: 'public',
+    status: 'active',
+    stage: 'planning', // opens in the builder (where the settle-up UI lives)
+    budget: 30000,
+    budget_currency: 'THB',
+    fork_count: 0,
+    start_date: new Date('2026-07-18'),
+    end_date: new Date('2026-07-20'),
+  };
+  await prisma.trip.upsert({
+    where: { id: OSAKA },
+    update: tripFields,
+    create: { id: OSAKA, user_id: SOMCHAI, ...tripFields },
+  });
+
+  // wanwisa is an accepted collaborator (owner somchai is implicit, no row needed)
+  await prisma.tripMember.create({
+    data: { trip_id: OSAKA, user_id: WANWISA, role: 'editor', status: 'accepted', invited_by: SOMCHAI, responded_at: new Date() },
+  });
+
+  const day = await prisma.tripDay.create({
+    data: { trip_id: OSAKA, day_number: 1, place: 'Osaka', date: new Date('2026-07-18') },
+  });
+
+  // scope 'shared' → split across both; 'assigned' → only the listed assignees owe.
+  // paid_by → who fronted the cost (drives settle-up).
+  const stops: Array<{
+    category: string; location_name: string; cost: number;
+    scope: 'shared' | 'assigned'; assignees: string[]; paid_by: string;
+  }> = [
+    { category: 'flight', location_name: 'Kansai Airport — group flights', cost: 12000, scope: 'shared', assignees: [], paid_by: SOMCHAI },
+    { category: 'hotel', location_name: 'Namba Oriental Hotel (2 nights)', cost: 8000, scope: 'shared', assignees: [], paid_by: WANWISA },
+    { category: 'food', location_name: 'Dotonbori street food crawl', cost: 2000, scope: 'shared', assignees: [], paid_by: SOMCHAI },
+    { category: 'activity', location_name: 'Universal Studios Japan', cost: 6000, scope: 'assigned', assignees: [WANWISA], paid_by: WANWISA },
+    { category: 'hotel', location_name: 'Capsule night (Somchai)', cost: 1500, scope: 'assigned', assignees: [SOMCHAI], paid_by: SOMCHAI },
+  ];
+  for (let i = 0; i < stops.length; i++) {
+    const s = stops[i];
+    await prisma.stop.create({
+      data: {
+        trip_id: OSAKA, day_id: day.id, user_id: SOMCHAI, status: 'planned',
+        category: s.category, location_name: s.location_name, cost: s.cost,
+        scope: s.scope, paid_by: s.paid_by, sort_order: i,
+        ...(s.assignees.length > 0 ? { assignees: { create: s.assignees.map((uid) => ({ user_id: uid })) } } : {}),
+      },
+    });
+  }
+
+  // Photo pool — trip-level media with no stop, two uploaders, mixed visibility.
+  const pool: Array<{ user_id: string; visibility: string; seed: string }> = [
+    { user_id: SOMCHAI, visibility: 'shared', seed: 'osaka-castle' },
+    { user_id: SOMCHAI, visibility: 'shared', seed: 'osaka-dotonbori' },
+    { user_id: WANWISA, visibility: 'shared', seed: 'osaka-usj' },
+    { user_id: SOMCHAI, visibility: 'private', seed: 'osaka-selfie' },
+  ];
+  await prisma.media.createMany({
+    data: pool.map((p, j) => {
+      const url = `https://picsum.photos/seed/${p.seed}/800/600`;
+      return { trip_id: OSAKA, stop_id: null, user_id: p.user_id, type: 'photo', visibility: p.visibility, url, cdn_url: url, sort_order: j };
+    }),
+  });
+
+  // A short chat thread (created_at spaced so order is stable).
+  const base = new Date('2026-06-15T09:00:00Z').getTime();
+  const chat: Array<{ user_id: string; body: string }> = [
+    { user_id: SOMCHAI, body: 'Booked our group flights to Kansai ✈️ paid for both, settle later!' },
+    { user_id: WANWISA, body: 'Nice! I grabbed the Namba hotel for 2 nights then 🙌' },
+    { user_id: WANWISA, body: 'I really wanna do Universal Studios — adding it just for me' },
+    { user_id: SOMCHAI, body: 'Go for it. I might skip and do a capsule night instead 😴' },
+  ];
+  await prisma.tripMessage.createMany({
+    data: chat.map((m, i) => ({ trip_id: OSAKA, user_id: m.user_id, body: m.body, created_at: new Date(base + i * 60000) })),
+  });
+}
+
 async function main() {
   // clear any non-canonical trips from prior runs (forks, test drafts) — cascades their stops/days
-  await prisma.trip.deleteMany({ where: { id: { notIn: [JAPAN, CHIANGMAI, RAMEN] } } });
+  await prisma.trip.deleteMany({ where: { id: { notIn: [JAPAN, CHIANGMAI, RAMEN, OSAKA] } } });
 
   const password_hash = await bcrypt.hash(PASSWORD, 10);
   for (const u of USERS) {
@@ -230,6 +323,8 @@ async function main() {
     ],
   });
 
+  await seedCollabTrip();
+
   // Compute feed-eligibility for every visited stop (same rule the API uses).
   const visited = await prisma.stop.findMany({
     where: { status: 'visited' },
@@ -265,7 +360,7 @@ async function main() {
   await prisma.savedItem.create({ data: { user_id: SOMCHAI, trip_id: CHIANGMAI } });
   if (afuri) await prisma.savedItem.create({ data: { user_id: SOMCHAI, stop_id: afuri.id } });
 
-  console.log('Seeded 3 users (password: ' + PASSWORD + '), 3 follows, 3 trips, trail + feed-eligibility + saved.');
+  console.log('Seeded 3 users (password: ' + PASSWORD + '), 3 follows, 4 trips (incl. 1 collaborative), trail + feed-eligibility + saved.');
 }
 
 main()

@@ -1,7 +1,12 @@
-import type { BookingOffer } from '@trailr/shared';
+import type {
+  BookingConfirmation,
+  BookingOffer,
+  GuestDetails,
+  PassengerDetails,
+} from '@trailr/shared';
 
-/** Swap booking providers (mock, Amadeus, Agoda) without touching the service. */
-export const BOOKING_PROVIDER = Symbol('BOOKING_PROVIDER');
+export const FLIGHT_PROVIDER = Symbol('FLIGHT_PROVIDER');
+export const HOTEL_PROVIDER = Symbol('HOTEL_PROVIDER');
 
 export interface FlightSearch {
   origin?: string;
@@ -14,8 +19,14 @@ export interface HotelSearch {
   nights?: number;
 }
 
-export interface BookingProviderApi {
+export interface FlightProviderApi {
   readonly name: string;
   searchFlights(params: FlightSearch): Promise<BookingOffer[]>;
+  bookFlight(offerId: string, passengerDetails?: PassengerDetails): Promise<BookingConfirmation>;
+}
+
+export interface HotelProviderApi {
+  readonly name: string;
   searchHotels(params: HotelSearch): Promise<BookingOffer[]>;
+  bookHotel(rateId: string, guestDetails?: GuestDetails): Promise<BookingConfirmation>;
 }

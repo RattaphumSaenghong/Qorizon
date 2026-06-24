@@ -9,50 +9,98 @@ import type {
 } from '@trailr/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PolicyService } from '../../authz/policy.service';
-import { BOOKING_PROVIDER, type BookingProviderApi } from './providers/booking-provider';
+import {
+  FLIGHT_PROVIDER,
+  HOTEL_PROVIDER,
+  type FlightProviderApi,
+  type HotelProviderApi,
+} from './providers/booking-provider';
 import { SearchBookingDto } from './dto/search-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 
-const COMMISSION_RATE = 0.08; // Trailr's cut
+// Internal estimate of provider/affiliate payout. This is not user-facing markup.
+const ESTIMATED_PROVIDER_COMMISSION_RATE = 0.08;
 
 @Injectable()
 export class BookingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
-    @Inject(BOOKING_PROVIDER) private readonly provider: BookingProviderApi,
+    @Inject(FLIGHT_PROVIDER) private readonly flightProvider: FlightProviderApi,
+    @Inject(HOTEL_PROVIDER) private readonly hotelProvider: HotelProviderApi,
   ) {}
 
   /** Search live offers via the active provider (no DB write). */
   async search(dto: SearchBookingDto): Promise<BookingOffer[]> {
     if (dto.type === 'flight') {
-      return this.provider.searchFlights({
+      return this.flightProvider.searchFlights({
         origin: dto.origin,
         destination: dto.destination,
         depart_date: dto.depart_date,
       });
     }
-    return this.provider.searchHotels({ city: dto.city, check_in: dto.check_in, nights: dto.nights });
+    return this.hotelProvider.searchHotels({ city: dto.city, check_in: dto.check_in, nights: dto.nights });
   }
 
-  /** Book an offer (status 'pending'). Records the commission. */
+  /** Book an offer (status 'pending'). If a trip + assignees are given, also
+   *  creates an assigned logistics block in the itinerary and links it. */
   async create(userId: string, dto: CreateBookingDto): Promise<BookingRow> {
     if (dto.trip_id) await this.policy.assertCanReadTrip(userId, dto.trip_id);
 
-    const commission = Math.round(dto.amount_thb * COMMISSION_RATE);
-    const booking = await this.prisma.booking.create({
-      data: {
-        user_id: userId,
-        trip_id: dto.trip_id ?? null,
-        type: dto.type,
-        provider: dto.provider,
-        external_ref: dto.external_ref,
-        status: 'pending',
-        amount_thb: dto.amount_thb,
-        commission_thb: commission,
-        raw_payload: { title: dto.title ?? null, meta: dto.meta ?? null } as Prisma.InputJsonValue,
-      },
+    const commission = Math.round(dto.amount_thb * ESTIMATED_PROVIDER_COMMISSION_RATE);
+    const assigneeIds = dto.assignee_ids ?? [];
+    const scope = dto.trip_id && assigneeIds.length > 0 ? 'assigned' : 'shared';
+    const confirmation =
+      dto.external_ref && dto.type === 'flight' && dto.passenger_details
+        ? await this.flightProvider.bookFlight(dto.external_ref, dto.passenger_details)
+        : dto.external_ref && dto.type === 'hotel' && dto.guest_details
+          ? await this.hotelProvider.bookHotel(dto.external_ref, dto.guest_details)
+          : null;
+    const externalRef = confirmation?.external_ref ?? null;
+    const status = confirmation?.status ?? 'pending';
+
+    const booking = await this.prisma.$transaction(async (tx) => {
+      let stopId: string | null = null;
+
+      if (dto.trip_id) {
+        // Create the itinerary logistics block
+        const stop = await tx.stop.create({
+          data: {
+            trip_id: dto.trip_id,
+            user_id: userId,
+            category: dto.type === 'flight' ? 'flight' : 'hotel',
+            location_name: dto.title ?? null,
+            status: 'planned',
+            scope,
+            cost: dto.amount_thb ? Math.round(dto.amount_thb) : undefined,
+            ...(scope === 'assigned' && assigneeIds.length > 0
+              ? { assignees: { create: assigneeIds.map((uid) => ({ user_id: uid })) } }
+              : {}),
+          },
+        });
+        stopId = stop.id;
+      }
+
+      return tx.booking.create({
+        data: {
+          user_id: userId,
+          trip_id: dto.trip_id ?? null,
+          stop_id: stopId,
+          type: dto.type,
+          provider: dto.provider,
+          external_ref: externalRef,
+          status,
+          amount_thb: dto.amount_thb,
+          commission_thb: commission,
+          raw_payload: {
+            title: dto.title ?? null,
+            meta: dto.meta ?? null,
+            confirmation: confirmation?.raw ?? null,
+          } as Prisma.InputJsonValue,
+        },
+      });
     });
+
     return toBookingRow(booking);
   }
 

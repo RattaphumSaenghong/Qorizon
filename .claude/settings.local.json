@@ -63,7 +63,26 @@
       "Bash(curl -s -X POST http://localhost:3000/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"somchai@trailr.app\",\"password\":\"password123\"}')",
       "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const a=JSON.parse\\(s\\);const d1=a.filter\\(x=>x.location_name&&!/Test Ramen/.test\\(x.location_name\\)\\);console.log\\('total stops:',a.length,'| any Test Ramen left:',a.some\\(x=>/Test Ramen/.test\\(x.location_name||''\\)\\)\\)}\\)\")",
       "Bash(echo \"=== migrate exit: $? ===\")",
-      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const u=JSON.parse\\(s\\);console.log\\('  real_name:',u.real_name,'| phone:',u.phone\\)}\\)\")"
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const u=JSON.parse\\(s\\);console.log\\('  real_name:',u.real_name,'| phone:',u.phone\\)}\\)\")",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Write-Host \"Port 3000 cleared\")",
+      "PowerShell(Read-Host -Prompt \"dummy\" 2>$null; \\(Invoke-WebRequest http://localhost:3000/api/v1 -UseBasicParsing -ErrorAction SilentlyContinue\\).StatusCode)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/api/v1/auth/login -X POST -H 'Content-Type: application/json' -d '{\"email\":\"somchai@trailr.app\",\"password\":\"password123\"}')",
+      "Bash(curl -s http://localhost:3000/api/v1/auth/login -X POST -H 'Content-Type: application/json' -d '{\"email\":\"somchai@trailr.app\",\"password\":\"password123\"}')",
+      "Bash(cd /c/Users/zacrt/Projects_1/claude-workspace/Qorizon/trailr/src/components && ls -1 | grep -i map)",
+      "Bash(cd /c/Users/zacrt/Projects_1/claude-workspace/Qorizon/api/src/modules/trips/dto && ls -1)",
+      "Read(//c/c/Users/zacrt/Projects_1/claude-workspace/Qorizon/api/prisma/**)",
+      "Read(//c/c/Users/zacrt/Projects_1/claude-workspace/Qorizon/api/prisma/migrations/20260609154645_stop_planned_times/**)",
+      "Bash(node -e 'const{PrismaClient}=require\\('\\\\''@prisma/client'\\\\''\\);const p=new PrismaClient\\(\\);p.$queryRaw`SELECT 1 as ok`.then\\(r=>{console.log\\('\\\\''DB OK'\\\\'',r\\);process.exit\\(0\\)}\\).catch\\(e=>{console.log\\('\\\\''DB ERR'\\\\'',e.message.split\\('\\\\''\\\\n'\\\\''\\)[0]\\);process.exit\\(1\\)}\\)')",
+      "Bash(curl -s \"http://localhost:3000/api/v1/trips/aaaa0001-0000-0000-0000-000000000001/stops\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const s=JSON.parse\\(d\\);const n=s.find\\(x=>x.location_name&&x.location_name.includes\\('Narita'\\)\\);console.log\\('Narita cost =', n? n.cost : 'not found'\\);console.log\\('stops with cost:', s.filter\\(x=>x.cost!=null\\).map\\(x=>x.location_name+':'+x.cost\\).join\\(', '\\)||'none'\\);}\\)\")",
+      "Bash(curl -s \"http://localhost:3000/api/v1/trips/aaaa0001-0000-0000-0000-000000000001/days\")",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\).on\\('end',\\(\\)=>{const days=JSON.parse\\(d\\);console.log\\(days.map\\(x=>'Day '+x.day_number+': '+x.place+' \\('+x.date+'\\)'\\).join\\('\\\\n'\\)\\);}\\)\")",
+      "Bash(node -e \"const{PrismaClient}=require\\('@prisma/client'\\);const p=new PrismaClient\\(\\);p.trip.update\\({where:{id:'aaaa0001-0000-0000-0000-000000000001'},data:{budget:120000,budget_currency:'THB'}}\\).then\\(t=>{console.log\\('budget set:',t.budget,t.budget_currency\\);process.exit\\(0\\)}\\).catch\\(e=>{console.log\\('ERR',e.message.split\\('\\\\n'\\)[0]\\);process.exit\\(1\\)}\\)\")",
+      "Read(//c/c/Users/zacrt/Projects_1/claude-workspace/Qorizon/api/src/modules/**)",
+      "Bash(echo \"===SHARED EXIT $?===\")",
+      "Bash(echo \"===PRISMA EXIT $?===\")",
+      "Bash(echo \"===API BUILD EXIT $?===\")",
+      "Bash(git add *)"
     ]
   }
 }

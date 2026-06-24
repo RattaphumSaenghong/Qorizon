@@ -11,6 +11,7 @@ export function toTripRow(t: Trip): TripRow {
     cover_image_url: t.cover_image_url,
     status: t.status as TripRow['status'],
     stage: t.stage as TripRow['stage'],
+    transport_mode: t.transport_mode as TripRow['transport_mode'],
     destination: t.destination,
     budget: t.budget,
     budget_currency: t.budget_currency,
@@ -21,7 +22,6 @@ export function toTripRow(t: Trip): TripRow {
     fork_count: t.fork_count,
     start_date: dateOnly(t.start_date),
     end_date: dateOnly(t.end_date),
-    album_overrides: t.album_overrides ?? null,
     created_at: t.created_at.toISOString(),
     updated_at: t.updated_at.toISOString(),
   };

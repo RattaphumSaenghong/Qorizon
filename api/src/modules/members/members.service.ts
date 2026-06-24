@@ -30,15 +30,42 @@ export class MembersService {
     return toMemberItem(member);
   }
 
-  /** Everyone on the trip (owner can read; visibility enforced by policy). */
+  /** Everyone on the trip — owner first (as a synthetic accepted member), then invited members. */
   async list(viewerId: string | null, tripId: string): Promise<TripMemberItem[]> {
     await this.policy.assertCanReadTrip(viewerId, tripId);
-    const members = await this.prisma.tripMember.findMany({
-      where: { trip_id: tripId },
-      include: { user: true },
-      orderBy: { created_at: 'asc' },
-    });
-    return members.map(toMemberItem);
+    const [trip, members] = await Promise.all([
+      this.prisma.trip.findUniqueOrThrow({
+        where: { id: tripId },
+        select: {
+          user_id: true,
+          author: { select: { id: true, username: true, display_name: true, avatar_url: true, real_name: true } },
+        },
+      }),
+      this.prisma.tripMember.findMany({
+        where: { trip_id: tripId },
+        include: { user: true },
+        orderBy: { created_at: 'asc' },
+      }),
+    ]);
+
+    const ownerMember: TripMemberItem = {
+      id: `owner-${tripId}`,
+      trip_id: tripId,
+      user_id: trip.user_id,
+      role: 'owner',
+      status: 'accepted',
+      user: {
+        id: trip.author.id,
+        username: trip.author.username,
+        display_name: trip.author.display_name,
+        avatar_url: trip.author.avatar_url,
+        real_name: trip.author.real_name,
+      },
+    };
+
+    // Guard against the owner somehow having a trip_members row too
+    const otherMembers = members.filter((m) => m.user_id !== trip.user_id);
+    return [ownerMember, ...otherMembers.map(toMemberItem)];
   }
 
   /** The invited user accepts or declines. */
@@ -47,11 +74,24 @@ export class MembersService {
       where: { trip_id_user_id: { trip_id: tripId, user_id: userId } },
     });
     if (!member) throw new NotFoundException('no invite for this trip');
-    const updated = await this.prisma.tripMember.update({
-      where: { id: member.id },
-      data: { status, responded_at: new Date() },
-      include: { user: true },
-    });
+    const [updated, trip] = await Promise.all([
+      this.prisma.tripMember.update({
+        where: { id: member.id },
+        data: { status, responded_at: new Date() },
+        include: { user: true },
+      }),
+      this.prisma.trip.findUnique({ where: { id: tripId }, select: { user_id: true } }),
+    ]);
+    if (trip && trip.user_id !== userId) {
+      await this.prisma.notification.create({
+        data: {
+          user_id: trip.user_id,
+          type: status === 'accepted' ? 'member_accepted' : 'member_declined',
+          actor_id: userId,
+          trip_id: tripId,
+        },
+      });
+    }
     return toMemberItem(updated);
   }
 

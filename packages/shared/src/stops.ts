@@ -1,11 +1,15 @@
-import type { MediaType, StopCategory, StopStatus } from './enums';
-import type { Author } from './trips';
+import type { MediaType, MediaVisibility, StopCategory, StopStatus } from './enums';
+import type { Author, AuthorLite } from './trips';
+
+export type StopScope = 'shared' | 'assigned';
 
 export interface MediaRow {
   id: string;
-  stop_id: string;
+  trip_id: string;
+  stop_id: string | null;
   user_id: string;
   type: MediaType;
+  visibility: MediaVisibility;
   url: string;
   cdn_url: string | null;
   latitude: number | null;
@@ -23,13 +27,18 @@ export interface StopRow {
   day_id: string | null;
   user_id: string;
   status: StopStatus;
+  scope: StopScope;
   category: StopCategory;
+  assignees: AuthorLite[];
   location_name: string | null;
   latitude: number | null;
   longitude: number | null;
   place_id: string | null;
-  planned_time: string | null;
+  planned_start: string | null;
+  planned_end: string | null;
   duration_mins: number | null;
+  cost: number | null;
+  paid_by: string | null;
   sort_order: number;
   notes: string | null;
   caption: string | null;
@@ -58,20 +67,27 @@ export interface CreateStopRequest {
   trip_id: string;
   day_id?: string;
   status?: StopStatus;
+  scope?: StopScope;
+  assignee_ids?: string[];
   category?: StopCategory;
   location_name?: string;
   latitude?: number;
   longitude?: number;
   place_id?: string;
-  planned_time?: string;
+  planned_start?: string;
+  planned_end?: string;
   duration_mins?: number;
+  cost?: number;
+  paid_by?: string;
   sort_order?: number;
   notes?: string;
   caption?: string;
   captured_at?: string;
 }
 
-export type UpdateStopRequest = Partial<Omit<CreateStopRequest, 'trip_id'>>;
+export type UpdateStopRequest = Partial<Omit<CreateStopRequest, 'trip_id'>> & {
+  paid_by?: string | null;
+};
 
 export interface LikeStateResponse {
   is_liked: boolean;

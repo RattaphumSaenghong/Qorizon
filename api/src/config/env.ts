@@ -9,6 +9,7 @@ const schema = z.object({
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('30d'),
   PORT: z.coerce.number().default(3000),
+  NODE_ENV: z.string().default('development'),
 
   // Media storage. If the R2_* vars are all set, the R2 provider is used;
   // otherwise files are stored on local disk (dev) and served from /uploads.
@@ -20,11 +21,19 @@ const schema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().optional(),
   R2_PUBLIC_BASE: z.string().url().optional(),
 
-  // Bookings. Set AMADEUS_* to use the real Amadeus flight API (free test tier);
-  // otherwise the mock provider is used.
-  AMADEUS_CLIENT_ID: z.string().optional(),
-  AMADEUS_CLIENT_SECRET: z.string().optional(),
-  AMADEUS_THB_RATE: z.coerce.number().optional(),
+  // Bookings. Leave keys blank for mock mode.
+  DUFFEL_API_KEY: z.string().optional(),
+  LITEAPI_KEY: z.string().optional(),
+  BOOKING_USD_THB_RATE: z.coerce.number().optional(),
+
+  // Mapbox — transit (rail station) proximity for hotel recommendations.
+  // Leave blank to disable transit scoring (recs still rank on sights/budget/rating).
+  MAPBOX_TOKEN: z.string().optional(),
+
+  // Email ingestion. The signing secret verifies inbound email webhooks; Anthropic
+  // is optional and only used as a fallback parser when configured.
+  INBOUND_EMAIL_SIGNING_SECRET: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof schema>;

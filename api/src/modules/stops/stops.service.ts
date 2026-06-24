@@ -9,9 +9,18 @@ import { toStopRow, toStopWithMedia } from './stop.mapper';
 import { computeFeedEligible } from './feed-eligibility';
 import { AUTHOR_SELECT } from '../../common/prisma-selects';
 
-const FEED_INCLUDE = {
+const ASSIGNEES_INCLUDE = {
+  assignees: { include: { user: { select: AUTHOR_SELECT } } },
+} as const;
+
+const STOP_INCLUDE = {
   media: { orderBy: { sort_order: 'asc' } },
   author: { select: AUTHOR_SELECT },
+  ...ASSIGNEES_INCLUDE,
+} as const;
+
+const FEED_INCLUDE = {
+  ...STOP_INCLUDE,
   trip: { select: { id: true, title: true, cover_image_url: true } },
 } as const;
 
@@ -30,7 +39,7 @@ export class StopsService {
     await this.policy.assertCanReadTrip(userId, tripId);
     const stops = await this.prisma.stop.findMany({
       where: { trip_id: tripId, ...(status ? { status } : {}) },
-      include: { media: { orderBy: { sort_order: 'asc' } }, author: { select: AUTHOR_SELECT } },
+      include: STOP_INCLUDE,
       orderBy: { sort_order: 'asc' },
     });
     return stops.map(toStopWithMedia);
@@ -46,8 +55,29 @@ export class StopsService {
 
     const stops = await this.prisma.stop.findMany({
       where,
-      include: { media: { orderBy: { sort_order: 'asc' } }, author: { select: AUTHOR_SELECT } },
+      include: STOP_INCLUDE,
       orderBy: { captured_at: 'desc' },
+    });
+    return stops.map(toStopWithMedia);
+  }
+
+  /** A user's travel-map stops: visited footprint plus planned future places. */
+  async getUserMapStops(viewerId: string | null, targetId: string): Promise<StopWithMedia[]> {
+    const withCoords: Prisma.StopWhereInput = {
+      latitude: { not: null },
+      longitude: { not: null },
+      status: { in: ['visited', 'planned'] },
+      user_id: targetId,
+    };
+    const where: Prisma.StopWhereInput =
+      viewerId === targetId
+        ? withCoords
+        : { ...withCoords, trip: { visibility: { in: ['public', 'followers'] } } };
+
+    const stops = await this.prisma.stop.findMany({
+      where,
+      include: STOP_INCLUDE,
+      orderBy: [{ status: 'desc' }, { captured_at: 'desc' }, { created_at: 'desc' }],
     });
     return stops.map(toStopWithMedia);
   }
@@ -115,13 +145,19 @@ export class StopsService {
 
   async create(userId: string, dto: CreateStopDto): Promise<StopRow> {
     await this.policy.assertOwnsTrip(userId, dto.trip_id);
-    const { captured_at, ...rest } = dto;
+    const { captured_at, assignee_ids, scope, ...rest } = dto;
+    const resolvedScope = assignee_ids && assignee_ids.length > 0 ? 'assigned' : (scope ?? 'shared');
     const stop = await this.prisma.stop.create({
       data: {
         ...rest,
         user_id: userId,
+        scope: resolvedScope,
         captured_at: captured_at ? new Date(captured_at) : undefined,
+        ...(resolvedScope === 'assigned' && assignee_ids?.length
+          ? { assignees: { create: assignee_ids.map((uid) => ({ user_id: uid })) } }
+          : {}),
       },
+      include: ASSIGNEES_INCLUDE,
     });
     const feed_eligible = await this.recomputeFeedEligibility(stop.id);
     return toStopRow({ ...stop, feed_eligible });
@@ -130,13 +166,22 @@ export class StopsService {
   async update(userId: string, stopId: string, dto: UpdateStopDto): Promise<StopRow> {
     const tripId = await this.stopTripId(stopId);
     await this.policy.assertOwnsTrip(userId, tripId);
-    const { captured_at, ...rest } = dto;
+    const { captured_at, assignee_ids, scope, ...rest } = dto;
+    const resolvedScope = assignee_ids !== undefined
+      ? (assignee_ids.length > 0 ? 'assigned' : 'shared')
+      : scope;
+
     const stop = await this.prisma.stop.update({
       where: { id: stopId },
       data: {
         ...rest,
+        ...(resolvedScope !== undefined ? { scope: resolvedScope } : {}),
         captured_at: captured_at ? new Date(captured_at) : undefined,
+        ...(assignee_ids !== undefined
+          ? { assignees: { deleteMany: {}, ...(assignee_ids.length > 0 ? { create: assignee_ids.map((uid) => ({ user_id: uid })) } : {}) } }
+          : {}),
       },
+      include: ASSIGNEES_INCLUDE,
     });
     const feed_eligible = await this.recomputeFeedEligibility(stop.id);
     return toStopRow({ ...stop, feed_eligible });

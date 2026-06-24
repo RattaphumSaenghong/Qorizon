@@ -23,14 +23,17 @@ import { Avatar } from '../../src/components/Avatar';
 import { Chip } from '../../src/components/Chip';
 import { Btn } from '../../src/components/Btn';
 import { MapView } from '../../src/components/MapView';
+import { MapSheet } from '../../src/components/MapSheet';
 import { ForkModal } from '../../src/components/ForkModal';
-import { fetchTrip, fetchTripDays, fetchTripStops, useForkTrip, useToggleSave, useSaved, useTrail } from '@trailr/db';
+import { fetchTrip, fetchTripDays, fetchTripStops, useForkTrip, useToggleSave, useSaved, useTrail, useContributors } from '@trailr/db';
+import { MemberSwitcher } from '../../src/components/MemberSwitcher';
 import { Trip, Moment, Day } from '../../src/data/mockTrips';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useTrailRecorder } from '../../src/hooks/useTrailRecorder';
 import { LiveBadge } from '../../src/components/LiveBadge';
 import { PressableScale } from '../../src/components/PressableScale';
 import { useCollapsibleSplit } from '../../src/hooks/useCollapsibleSplit';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import { useToast } from '../../src/components/Toast';
 
 // ── Date helpers ─────────────────────────────────────────────
@@ -64,7 +67,7 @@ async function fetchJournal(tripId: string): Promise<Trip | null> {
       .filter((s: any) => s.day_id === d.id)
       .map((s: any, i: number): Moment => ({
         id: s.id,
-        time: s.planned_time ?? '',
+        time: s.planned_start ?? '',
         location: s.location_name ?? '',
         caption: s.caption ?? '',
         latitude: s.latitude ?? 0,
@@ -182,7 +185,12 @@ export default function JournalScreen() {
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   // Collapse journal → map-focused (animated 70/30 ↔ 30/70).
   const { focused: mapFocus, toggle: toggleMapFocus, contentWidth } = useCollapsibleSplit();
-  const { data: trail = [] } = useTrail(id ?? '');
+  const { isPhone } = useResponsive();
+  // Whose trail/route is shown. null = owner's; default to your own once we know
+  // you have memory on this trip.
+  const [selectedMember, setSelectedMember] = useState<string | null>(null);
+  const { data: contributors = [] } = useContributors(id ?? '');
+  const { data: trail = [] } = useTrail(id ?? '', selectedMember);
   const recorder = useTrailRecorder(id ?? '');
   const toast = useToast();
   useEffect(() => {
@@ -191,6 +199,11 @@ export default function JournalScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const forkMutation = useForkTrip();
   const currentUser = useAuthStore((s) => s.user);
+  useEffect(() => {
+    if (selectedMember === null && currentUser && contributors.some((c) => c.id === currentUser.id)) {
+      setSelectedMember(currentUser.id);
+    }
+  }, [contributors, currentUser, selectedMember]);
   const toggleSave = useToggleSave();
   const { data: savedItems = [] } = useSaved();
   const isSaved = savedItems.some((s) => s.trip?.id === id);
@@ -263,6 +276,10 @@ export default function JournalScreen() {
   }
 
   const isOwner = !!currentUser && currentUser.id === trip.ownerId;
+  // Any member (owner or accepted collaborator with memory here) records their OWN trail.
+  const canRecord = !!currentUser && (isOwner || contributors.some((c) => c.id === currentUser.id));
+  // Switcher highlight: contributors come owner-first, so [0] is the owner default.
+  const effectiveMember = selectedMember ?? contributors[0]?.id ?? null;
 
   // Real GPS pins for the map — one per visited stop that has coordinates.
   const mapPosts = trip.days
@@ -284,21 +301,71 @@ export default function JournalScreen() {
     .filter((p) => p.latitude != null && p.longitude != null)
     .map((p) => [p.longitude, p.latitude] as [number, number]);
 
+  // The map + its in-map overlays — reused by the desktop split column and the phone MapSheet.
+  const mapView = (
+    <MapView
+      initialLongitude={trip.centerLon}
+      initialLatitude={trip.centerLat}
+      initialZoom={trip.centerZoom}
+      posts={mapPosts}
+      trail={gpsTrail}
+      route={stopRoute}
+      activeId={selectedStopId}
+      onSelectPost={setSelectedStopId}
+    >
+      {recorder.isRecording && (
+        <View style={styles.liveBadgeWrap}>
+          <LiveBadge />
+        </View>
+      )}
+      <View style={styles.dayBadge}>
+        <Text style={styles.dayBadgeText}>
+          Day {currentDay} of {trip.days.length} · {trip.days[currentDay - 1]?.place}
+        </Text>
+      </View>
+      <View style={styles.scrubber}>
+        {trip.days.map((day) => (
+          <TouchableOpacity key={day.n} onPress={() => scrollToDay(day.n)}>
+            <View style={[
+              styles.scrubDot,
+              { backgroundColor: day.n === currentDay ? colors.acc : day.n < currentDay ? colors.acc : colors.line },
+              day.n === currentDay && styles.scrubDotActive,
+            ]}>
+              {day.n === currentDay && (
+                <Text style={styles.scrubDotLabel}>{day.n}</Text>
+              )}
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </MapView>
+  );
+
   return (
     <View style={styles.root}>
       {/* ── Header ── */}
-      <View style={styles.header}>
+      <View style={[styles.header, isPhone && styles.headerPhone]}>
         <Wordmark size={22} />
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backText}>‹ back to feed</Text>
         </TouchableOpacity>
+        <MemberSwitcher
+          members={contributors}
+          selectedId={effectiveMember}
+          currentUserId={currentUser?.id}
+          onSelect={setSelectedMember}
+        />
         <View style={{ flex: 1 }} />
         <Chip dot={false}>♡ {trip.likeCount.toLocaleString()}</Chip>
-        {isOwner && (
+        {canRecord && (
           <Btn
             sm
             solid={recorder.isRecording}
-            onPress={() => (recorder.isRecording ? recorder.stop() : recorder.start())}
+            onPress={() => {
+              if (recorder.isRecording) { recorder.stop(); return; }
+              if (currentUser) setSelectedMember(currentUser.id); // show your own trail while recording
+              recorder.start();
+            }}
           >
             {recorder.isRecording ? `● Recording (${recorder.pointCount})` : '● Record trail'}
           </Btn>
@@ -309,9 +376,9 @@ export default function JournalScreen() {
         <Avatar size={34} ring imageUri={currentUser?.avatar_url} />
       </View>
 
-      <View style={styles.body}>
-        {/* ── Left: journal (collapses to 30% in map-focus) ── */}
-        <Animated.View style={{ width: contentWidth }}>
+      <View style={[styles.body, isPhone && styles.bodyPhone]}>
+        {/* ── Left: journal (desktop: collapses 70/30; phone: full-width above the map sheet) ── */}
+        <Animated.View style={isPhone ? styles.journalPhone : { width: contentWidth }}>
         <ScrollView
           ref={scrollRef}
           style={styles.journalCol}
@@ -392,72 +459,34 @@ export default function JournalScreen() {
         </ScrollView>
         </Animated.View>
 
-        {/* ── Right: sticky map (fills remaining width) ── */}
-        <Animated.View style={[styles.mapCol, styles.mapColFill]}>
-          {/* collapse handle — toggles journal/map split between 70/30 and 30/70 */}
-          <PressableScale style={styles.collapseHandle} onPress={toggleMapFocus}>
-            <Text style={styles.collapseHandleIcon}>{mapFocus ? '›' : '‹'}</Text>
-          </PressableScale>
-          <View style={styles.mapWrapper}>
-          <MapView
-            initialLongitude={trip.centerLon}
-            initialLatitude={trip.centerLat}
-            initialZoom={trip.centerZoom}
-            posts={mapPosts}
-            trail={gpsTrail}
-            route={stopRoute}
-            activeId={selectedStopId}
-            onSelectPost={setSelectedStopId}
-          >
-            {/* live recording badge */}
-            {recorder.isRecording && (
-              <View style={styles.liveBadgeWrap}>
-                <LiveBadge />
-              </View>
-            )}
+        {/* ── Right: map — desktop split column, or a bottom-sheet on phone ── */}
+        {isPhone ? (
+          <MapSheet title={`🗺  Trail · ${mapPosts.length}`}>{mapView}</MapSheet>
+        ) : (
+          <Animated.View style={[styles.mapCol, styles.mapColFill]}>
+            {/* collapse handle — toggles journal/map split between 70/30 and 30/70 */}
+            <PressableScale style={styles.collapseHandle} onPress={toggleMapFocus}>
+              <Text style={styles.collapseHandleIcon}>{mapFocus ? '›' : '‹'}</Text>
+            </PressableScale>
+            <View style={styles.mapWrapper}>{mapView}</View>
 
-            {/* current day badge */}
-            <View style={styles.dayBadge}>
-              <Text style={styles.dayBadgeText}>
-                Day {currentDay} of {trip.days.length} · {trip.days[currentDay - 1]?.place}
-              </Text>
-            </View>
-
-            {/* day scrubber */}
-            <View style={styles.scrubber}>
+            {/* map footer: place list */}
+            <View style={styles.mapFooter}>
               {trip.days.map((day) => (
-                <TouchableOpacity key={day.n} onPress={() => scrollToDay(day.n)}>
-                  <View style={[
-                    styles.scrubDot,
-                    { backgroundColor: day.n === currentDay ? colors.acc : day.n < currentDay ? colors.acc : colors.line },
-                    day.n === currentDay && styles.scrubDotActive,
-                  ]}>
-                    {day.n === currentDay && (
-                      <Text style={styles.scrubDotLabel}>{day.n}</Text>
-                    )}
-                  </View>
+                <TouchableOpacity
+                  key={day.n}
+                  style={[styles.mapFooterItem, day.n === currentDay && styles.mapFooterItemActive]}
+                  onPress={() => scrollToDay(day.n)}
+                >
+                  <Text style={[styles.mapFooterDay, day.n === currentDay && styles.mapFooterDayActive]}>
+                    D{day.n}
+                  </Text>
+                  <Text style={styles.mapFooterPlace} numberOfLines={1}>{day.place}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-          </MapView>
-          </View>
-
-          {/* map footer: place list */}
-          <View style={styles.mapFooter}>
-            {trip.days.map((day) => (
-              <TouchableOpacity
-                key={day.n}
-                style={[styles.mapFooterItem, day.n === currentDay && styles.mapFooterItemActive]}
-                onPress={() => scrollToDay(day.n)}
-              >
-                <Text style={[styles.mapFooterDay, day.n === currentDay && styles.mapFooterDayActive]}>
-                  D{day.n}
-                </Text>
-                <Text style={styles.mapFooterPlace} numberOfLines={1}>{day.place}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Animated.View>
+          </Animated.View>
+        )}
       </View>
 
       {/* ── Fork modal ── */}
@@ -486,10 +515,21 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     backgroundColor: colors.paper,
   },
+  // Phone: the action-heavy header wraps to multiple rows instead of clipping.
+  headerPhone: {
+    height: undefined,
+    minHeight: 54,
+    flexWrap: 'wrap',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    rowGap: spacing.xs,
+  },
   backBtn: { paddingVertical: 4 },
   backText: { color: colors.sub, fontSize: fontSize.md },
 
   body: { flex: 1, flexDirection: 'row', overflow: 'hidden' },
+  bodyPhone: { flexDirection: 'column' },
+  journalPhone: { flex: 1 },
 
   // journal
   journalCol: { flex: 1 },

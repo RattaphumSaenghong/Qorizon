@@ -36,6 +36,7 @@ export class AuthService {
         email: dto.email,
         password_hash,
         username,
+        forwarding_token: this.newForwardingToken(),
         display_name: dto.display_name ?? username,
         language: dto.language ?? 'th',
       },
@@ -127,10 +128,15 @@ export class AuthService {
     return `${id}.${secret}`;
   }
 
+  private newForwardingToken(): string {
+    return randomBytes(9).toString('base64url');
+  }
+
   private toAuthUser(user: User): AuthUser {
     return {
       id: user.id,
       username: user.username,
+      forwarding_token: user.forwarding_token,
       display_name: user.display_name,
       avatar_url: user.avatar_url,
       bio: user.bio,

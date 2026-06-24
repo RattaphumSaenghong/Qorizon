@@ -8,11 +8,13 @@ import {
   unfollowUser,
   updateUser,
 } from '../queries/users';
+import { fetchUserMapStops } from '../queries/stops';
 
 export const userKeys = {
   detail: (id: string) => ['users', id] as const,
   byUsername: (username: string) => ['users', 'username', username] as const,
   posts: (id: string) => ['users', id, 'posts'] as const,
+  mapStops: (id: string) => ['users', id, 'map-stops'] as const,
   isFollowing: (currentId: string, targetId: string) =>
     ['users', 'following', currentId, targetId] as const,
 };
@@ -22,6 +24,16 @@ export function useUserPosts(userId: string) {
   return useQuery({
     queryKey: userKeys.posts(userId),
     queryFn: () => fetchUserPosts(userId),
+    enabled: !!userId,
+    staleTime: 1000 * 60,
+  });
+}
+
+/** A user's visited + planned stops for their profile map. */
+export function useUserMapStops(userId: string) {
+  return useQuery({
+    queryKey: userKeys.mapStops(userId),
+    queryFn: () => fetchUserMapStops(userId),
     enabled: !!userId,
     staleTime: 1000 * 60,
   });

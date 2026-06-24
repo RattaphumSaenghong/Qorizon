@@ -1,9 +1,10 @@
 /**
- * Notifications — the user's activity feed (live batches, follows, likes, comments).
+ * Notifications — activity feed (live batches, follows, likes, comments, chat, invites).
  */
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
+import { tripHref } from '../src/lib/tripHref';
 import {
   useNotifications,
   useMarkAllNotificationsRead,
@@ -27,6 +28,16 @@ function message(n: NotificationItem): string {
       return `${who} liked your post`;
     case 'comment':
       return `${who} commented on your post`;
+    case 'trip_invite':
+      return `${who} invited you${n.trip ? ` to ${n.trip.title}` : ''}`;
+    case 'trip_message':
+      return `${who} sent a message${n.trip ? ` in ${n.trip.title}` : ''}`;
+    case 'member_accepted':
+      return `${who} joined${n.trip ? ` ${n.trip.title}` : ''}`;
+    case 'member_declined':
+      return `${who} declined${n.trip ? ` ${n.trip.title}` : ''}`;
+    case 'inventory_item':
+      return 'Found a booking confirmation in your email';
     default:
       return `${who} did something`;
   }
@@ -41,7 +52,9 @@ export default function NotificationsScreen() {
 
   const open = (n: NotificationItem) => {
     if (!n.read) markRead.mutate(n.id);
-    if (n.trip) router.push(`/journal/${n.trip.id}`);
+    if (n.type === 'inventory_item') { router.push('/inventory'); return; }
+    if (n.type === 'trip_invite') { router.push('/(tabs)/trips'); return; }
+    if (n.trip) router.push(tripHref({ id: n.trip.id, stage: n.trip.stage }));
   };
 
   return (

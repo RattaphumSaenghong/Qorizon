@@ -28,6 +28,7 @@ export interface AuthTokens {
 export interface AuthUser {
   id: string;
   username: string;
+  forwarding_token: string | null;
   display_name: string | null;
   avatar_url: string | null;
   bio: string | null;

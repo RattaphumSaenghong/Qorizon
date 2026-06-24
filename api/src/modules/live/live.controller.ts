@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import type { LiveBatchRow, TrailPointRow, TripRow } from '@trailr/shared';
 import { PublicRead } from '../../common/decorators/public-read.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -35,8 +35,9 @@ export class LiveController {
   getTrail(
     @CurrentUser() userId: string | undefined,
     @Param('id') id: string,
+    @Query('member') member?: string,
   ): Promise<TrailPointRow[]> {
-    return this.live.getTrail(userId ?? null, id);
+    return this.live.getTrail(userId ?? null, id, member ?? null);
   }
 
   @Post('trips/:id/batches')

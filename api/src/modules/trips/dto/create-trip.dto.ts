@@ -10,9 +10,11 @@ import {
 } from 'class-validator';
 import {
   LIVE_CADENCE,
+  TRANSPORT_MODE,
   TRIP_STATUS,
   TRIP_VISIBILITY,
   type LiveCadence,
+  type TransportMode,
   type TripStatus,
   type TripVisibility,
 } from '@trailr/shared';
@@ -37,6 +39,10 @@ export class CreateTripDto {
   @IsOptional()
   @IsIn(['planning', 'living', 'album'])
   stage?: 'planning' | 'living' | 'album';
+
+  @IsOptional()
+  @IsIn(TRANSPORT_MODE)
+  transport_mode?: TransportMode;
 
   @IsOptional()
   @IsString()
@@ -72,4 +78,8 @@ export class CreateTripDto {
   @IsOptional()
   @IsDateString()
   end_date?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  backdated?: boolean;
 }

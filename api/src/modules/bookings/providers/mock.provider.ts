@@ -1,8 +1,8 @@
-import type { BookingOffer } from '@trailr/shared';
-import type { BookingProviderApi, FlightSearch, HotelSearch } from './booking-provider';
+import type { BookingConfirmation, BookingOffer, GuestDetails, PassengerDetails } from '@trailr/shared';
+import type { FlightProviderApi, FlightSearch, HotelProviderApi, HotelSearch } from './booking-provider';
 
-/** Deterministic offers for dev — no API keys, no network. */
-export class MockBookingProvider implements BookingProviderApi {
+/** Deterministic offers for dev: no API keys, no network. */
+export class MockFlightProvider implements FlightProviderApi {
   readonly name = 'mock';
 
   async searchFlights(p: FlightSearch): Promise<BookingOffer[]> {
@@ -17,12 +17,24 @@ export class MockBookingProvider implements BookingProviderApi {
       id: `mock-fl-${o}-${d}-${a.code}`,
       type: 'flight' as const,
       provider: 'mock' as const,
-      title: `${o} → ${d}`,
+      title: `${o} -> ${d}`,
       subtitle: `${a.name} · ${a.stops === 0 ? 'non-stop' : `${a.stops} stop`} · ${a.dur}`,
       amount_thb: a.price,
       meta: { airline: a.code, depart_date: p.depart_date, index: i },
     }));
   }
+
+  async bookFlight(offerId: string, passengerDetails?: PassengerDetails): Promise<BookingConfirmation> {
+    return {
+      external_ref: `mock-order-${offerId}`,
+      status: 'pending',
+      raw: { passengerDetails },
+    };
+  }
+}
+
+export class MockHotelProvider implements HotelProviderApi {
+  readonly name = 'mock';
 
   async searchHotels(p: HotelSearch): Promise<BookingOffer[]> {
     const city = p.city ?? 'Tokyo';
@@ -37,11 +49,20 @@ export class MockBookingProvider implements BookingProviderApi {
       type: 'hotel' as const,
       provider: 'mock' as const,
       title: h.name,
-      subtitle: `★ ${h.star} · ${nights} nights · ${city}`,
+      subtitle: `${h.star} rating · ${nights} nights · ${city}`,
       amount_thb: h.nightly * nights,
       latitude: h.lat,
       longitude: h.lon,
+      rating: h.star,
       meta: { nightly: h.nightly, nights, check_in: p.check_in },
     }));
+  }
+
+  async bookHotel(rateId: string, guestDetails?: GuestDetails): Promise<BookingConfirmation> {
+    return {
+      external_ref: `mock-hotel-${rateId}`,
+      status: 'pending',
+      raw: { guestDetails },
+    };
   }
 }

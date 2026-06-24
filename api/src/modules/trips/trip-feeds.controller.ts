@@ -19,12 +19,14 @@ export class TripFeedsController {
   }
 
   // A user's trips for their profile (public; richer when authed as the owner).
+  // includeArchived is honoured only when the viewer is the owner.
   @PublicRead()
   @Get('users/:id/trips')
   userTrips(
     @CurrentUser() viewerId: string | undefined,
     @Param('id') id: string,
+    @Query('includeArchived') includeArchived?: string,
   ): Promise<TripWithAuthor[]> {
-    return this.trips.getUserTrips(viewerId ?? null, id);
+    return this.trips.getUserTrips(viewerId ?? null, id, includeArchived === 'true');
   }
 }

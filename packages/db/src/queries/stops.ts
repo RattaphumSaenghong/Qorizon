@@ -10,6 +10,11 @@ export async function fetchTripStops(
   return request<StopWithMedia[]>('GET', `/trips/${tripId}/stops${q}`);
 }
 
+/** A user's visited + planned stops for their profile map. */
+export async function fetchUserMapStops(userId: string): Promise<StopWithMedia[]> {
+  return request<StopWithMedia[]>('GET', `/users/${userId}/map-stops`);
+}
+
 /** Home feed: recent VISITED stops from people the user follows. */
 export async function fetchFeedStops(_userId: string, limit = 30): Promise<FeedStop[]> {
   return request<FeedStop[]>('GET', `/feed/stops?limit=${limit}`);
@@ -42,14 +47,19 @@ export async function markStopVisited(
 export async function updateStop(
   stopId: string,
   patch: Partial<{
-    day_id: string;
+    day_id: string | null;
     status: StopStatus;
+    scope: 'shared' | 'assigned';
+    assignee_ids: string[];
     category: string;
     location_name: string;
     latitude: number;
     longitude: number;
-    planned_time: string;
+    planned_start: string;
+    planned_end: string;
     duration_mins: number;
+    cost: number | null;
+    paid_by: string | null;
     sort_order: number;
     notes: string;
     caption: string;

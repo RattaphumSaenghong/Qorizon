@@ -1,10 +1,13 @@
 import {
+  IsArray,
   IsDateString,
   IsIn,
   IsInt,
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
+  ValidateIf,
 } from 'class-validator';
 import {
   STOP_CATEGORY,
@@ -16,8 +19,9 @@ import {
 // Same as CreateStop but every field optional and no trip_id (a stop can't move trips).
 export class UpdateStopDto {
   @IsOptional()
+  @ValidateIf((o) => o.day_id !== null)
   @IsString()
-  day_id?: string;
+  day_id?: string | null;
 
   @IsOptional()
   @IsIn(STOP_STATUS)
@@ -45,11 +49,24 @@ export class UpdateStopDto {
 
   @IsOptional()
   @IsString()
-  planned_time?: string;
+  planned_start?: string;
+
+  @IsOptional()
+  @IsString()
+  planned_end?: string;
 
   @IsOptional()
   @IsInt()
   duration_mins?: number;
+
+  @IsOptional()
+  @IsInt()
+  cost?: number;
+
+  @IsOptional()
+  @ValidateIf((o) => o.paid_by !== null)
+  @IsUUID()
+  paid_by?: string | null;
 
   @IsOptional()
   @IsInt()
@@ -66,4 +83,13 @@ export class UpdateStopDto {
   @IsOptional()
   @IsDateString()
   captured_at?: string;
+
+  @IsOptional()
+  @IsIn(['shared', 'assigned'])
+  scope?: 'shared' | 'assigned';
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  assignee_ids?: string[];
 }

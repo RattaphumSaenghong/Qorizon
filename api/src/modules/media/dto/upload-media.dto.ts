@@ -1,5 +1,5 @@
-import { IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
-import { MEDIA_TYPE, type MediaType } from '@trailr/shared';
+import { IsIn, IsNumber, IsOptional, IsString, IsUUID } from 'class-validator';
+import { MEDIA_TYPE, MEDIA_VISIBILITY, type MediaType, type MediaVisibility } from '@trailr/shared';
 
 export class UploadMediaDto {
   @IsIn(MEDIA_TYPE)
@@ -10,7 +10,15 @@ export class UploadMediaDto {
   content_base64!: string;
 
   @IsString()
-  content_type!: string; // e.g. image/jpeg
+  content_type!: string;
+
+  @IsOptional()
+  @IsIn(MEDIA_VISIBILITY)
+  visibility?: MediaVisibility;
+
+  @IsOptional()
+  @IsUUID()
+  stop_id?: string;
 
   @IsOptional()
   @IsNumber()

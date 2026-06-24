@@ -12,7 +12,9 @@ import {
   Image,
   ActivityIndicator,
 } from 'react-native';
+import type { ViewStyle } from 'react-native';
 import { useRouter } from 'expo-router';
+import { tripHref } from '../../src/lib/tripHref';
 import { useUserTrips, useMyTripInvites, useRespondInvite } from '@trailr/db';
 import type { TripWithAuthor } from '@trailr/db';
 import { colors, spacing, fontSize, radius } from '../../src/theme/tokens';
@@ -20,14 +22,15 @@ import { TopBar } from '../../src/components/TopBar';
 import { Btn } from '../../src/components/Btn';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useToast } from '../../src/components/Toast';
+import { useResponsive } from '../../src/hooks/useResponsive';
 
-function TripCard({ trip, onOpen }: { trip: TripWithAuthor; onOpen: () => void }) {
+function TripCard({ trip, onOpen, cardStyle }: { trip: TripWithAuthor; onOpen: () => void; cardStyle?: ViewStyle }) {
   const statusColor =
     trip.status === 'active' ? colors.acc : trip.status === 'draft' ? colors.sub : colors.line;
   const statusLabel =
     trip.status === 'active' ? '● LIVE' : trip.status === 'draft' ? 'Draft' : 'Completed';
   return (
-    <TouchableOpacity style={styles.card} onPress={onOpen} activeOpacity={0.88}>
+    <TouchableOpacity style={[styles.card, cardStyle]} onPress={onOpen} activeOpacity={0.88}>
       <View style={styles.cover}>
         {trip.cover_image_url ? (
           <Image source={{ uri: trip.cover_image_url }} style={styles.coverImg} resizeMode="cover" />
@@ -54,14 +57,12 @@ function TripCard({ trip, onOpen }: { trip: TripWithAuthor; onOpen: () => void }
 
 export default function TripsScreen() {
   const router = useRouter();
+  const { isPhone } = useResponsive();
   const user = useAuthStore((s) => s.user);
   const { data: trips = [], isLoading } = useUserTrips(user?.id ?? '');
 
-  // Open a trip in the screen that matches its stage.
   const openTrip = (t: { id: string; stage?: string }) => {
-    const path =
-      t.stage === 'album' ? `/album/${t.id}` : t.stage === 'living' ? `/journal/${t.id}` : `/builder/${t.id}`;
-    router.push(path);
+    router.push(tripHref(t));
   };
 
   const toast = useToast();
@@ -128,9 +129,9 @@ export default function TripsScreen() {
           <Text style={styles.emptyText}>No trips yet. Create one or fork a trip you like.</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.grid}>
+        <ScrollView contentContainerStyle={[styles.grid, isPhone && styles.gridPhone]}>
           {trips.map((t) => (
-            <TripCard key={t.id} trip={t} onOpen={() => openTrip(t)} />
+            <TripCard key={t.id} trip={t} onOpen={() => openTrip(t)} cardStyle={isPhone ? styles.cardPhone : undefined} />
           ))}
         </ScrollView>
       )}
@@ -170,6 +171,8 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     padding: spacing.xxl,
   },
+  gridPhone: { padding: spacing.lg, gap: spacing.md },
+  cardPhone: { width: '100%' },
   card: {
     width: 260,
     borderRadius: radius.md,

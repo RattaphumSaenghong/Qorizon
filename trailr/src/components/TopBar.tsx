@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { colors, spacing, fontSize, TOP_BAR_H } from '../theme/tokens';
 import { Wordmark } from './Wordmark';
@@ -8,6 +8,8 @@ import { Btn } from './Btn';
 import { useAuthStore } from '../stores/authStore';
 import { useResponsive } from '../hooks/useResponsive';
 import { useUnreadCount } from '@trailr/db';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { SearchOverlay } from './SearchOverlay';
 
 function NotificationBell() {
   const router = useRouter();
@@ -40,10 +42,33 @@ export function TopBar({
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const { isPhone } = useResponsive();
+
+  const [rawQuery, setRawQuery] = useState('');
+  const [focused, setFocused] = useState(false);
+  const debouncedQuery = useDebouncedValue(rawQuery, 250);
+  const inputRef = useRef<TextInput>(null);
+
+  const overlayVisible = !isPhone && focused && rawQuery.length >= 2;
+
+  const handleSubmit = () => {
+    const q = rawQuery.trim();
+    if (q) router.push(`/search?q=${encodeURIComponent(q)}`);
+    inputRef.current?.blur();
+  };
+
+  const handlePhoneSearchPress = () => {
+    router.push('/search');
+  };
+
+  const handleResultPick = () => {
+    setRawQuery('');
+    setFocused(false);
+    inputRef.current?.blur();
+  };
+
   return (
     <View style={styles.bar}>
       <Wordmark size={isPhone ? 20 : 24} />
-      {/* Tabs live in the bottom tab bar on phone. */}
       {!isPhone && (
         <View style={styles.tabs}>
           {tabs.map((t) => (
@@ -62,13 +87,38 @@ export function TopBar({
       <View style={styles.spacer} />
       {showRight && (
         <>
-          {!isPhone && (
-            <>
-              <View style={styles.search}>
-                <Text style={styles.searchText}>⌕  Search places, trips, people</Text>
+          {isPhone ? (
+            <TouchableOpacity style={styles.searchPill} onPress={handlePhoneSearchPress}>
+              <Text style={styles.searchText}>⌕  Search</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.searchWrap}>
+              <View style={[styles.search, focused && styles.searchFocused]}>
+                <Text style={styles.searchIcon}>⌕</Text>
+                <TextInput
+                  ref={inputRef}
+                  style={styles.searchInput}
+                  placeholder="Search places, trips, people"
+                  placeholderTextColor={colors.sub}
+                  value={rawQuery}
+                  onChangeText={setRawQuery}
+                  onFocus={() => setFocused(true)}
+                  onBlur={() => setTimeout(() => setFocused(false), 150)}
+                  onSubmitEditing={handleSubmit}
+                  returnKeyType="search"
+                  clearButtonMode="while-editing"
+                />
               </View>
-              <Btn solid sm onPress={() => router.push('/(tabs)/trips')}>+ New trip</Btn>
-            </>
+              {overlayVisible && (
+                <SearchOverlay
+                  query={debouncedQuery}
+                  onPick={handleResultPick}
+                />
+              )}
+            </View>
+          )}
+          {!isPhone && (
+            <Btn solid sm onPress={() => router.push('/(tabs)/trips')}>+ New trip</Btn>
           )}
           {user ? (
             <>
@@ -97,6 +147,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.paper,
     gap: spacing.lg,
     flexShrink: 0,
+    zIndex: 100,
   },
   tabs: {
     flexDirection: 'row',
@@ -126,12 +177,42 @@ const styles = StyleSheet.create({
   spacer: {
     flex: 1,
   },
+  searchWrap: {
+    position: 'relative',
+    zIndex: 200,
+  },
   search: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: Platform.OS === 'web' ? 0 : 7,
     minWidth: 220,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.panel,
+    gap: 6,
+    height: 36,
+  },
+  searchFocused: {
+    borderColor: colors.acc,
+    backgroundColor: colors.paper,
+  },
+  searchIcon: {
+    fontSize: fontSize.md,
+    color: colors.sub,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: fontSize.md,
+    color: colors.ink,
+    outlineStyle: 'none',
+  } as object,
+  searchPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.line,

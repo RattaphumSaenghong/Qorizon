@@ -21,6 +21,9 @@ export interface PostPin {
   caption: string;
   hasVideo?: boolean;
   photoUrl?: string;
+  /** 1-based order label, drawn inside the pin (builder route sequence). */
+  index?: number;
+  markerKind?: 'visited' | 'planned';
   onPress?: () => void;
 }
 
@@ -37,6 +40,8 @@ interface MapViewProps {
   activeId?: string | null;
   /** When provided, clicking a pin selects it (id) instead of opening a popup. */
   onSelectPost?: (id: string) => void;
+  /** Fires when the pointer enters/leaves a pin. */
+  onHoverPost?: (id: string | null) => void;
   /** Fires with the visible map bounds on load and after every pan/zoom. */
   onBoundsChange?: (b: { west: number; south: number; east: number; north: number }) => void;
   /** Recenter target — the map eases here whenever this changes (after mount). */
@@ -66,6 +71,7 @@ export function MapView({
   route = [],
   activeId = null,
   onSelectPost,
+  onHoverPost,
   onBoundsChange,
   center = null,
   onMapPress,
@@ -162,33 +168,41 @@ export function MapView({
       // Inner visual carries the hover scale, so it doesn't clobber positioning.
       const size = isActive ? 60 : 40;
       const inner = document.createElement('div');
+      const isPlanned = post.markerKind === 'planned';
       inner.style.cssText = `
         width: ${size}px; height: ${size}px; border-radius: 50%;
-        background: #fbf9f5;
-        border: ${isActive ? 4 : 3}px solid #e07a5f;
+        background: ${isPlanned ? '#d6d2c9' : '#fbf9f5'};
+        border: ${isActive ? 4 : 3}px ${isPlanned ? 'dashed' : 'solid'} ${isPlanned ? '#9b958a' : '#e07a5f'};
         display: flex; align-items: center; justify-content: center;
-        box-shadow: 0 2px 8px rgba(0,0,0,${isActive ? 0.35 : 0.2});
+        box-shadow: 0 2px 8px rgba(0,0,0,${isPlanned ? 0.10 : isActive ? 0.35 : 0.2});
         transition: transform 0.15s ease;
         overflow: hidden;
         font-size: 18px;
+        color: ${isPlanned ? '#6f6b62' : '#e07a5f'};
       `;
-      // Active pin shows its photo; others show the 📍 glyph.
-      if (isActive && post.photoUrl) {
+      // Active pin shows its photo; numbered pins show their order; else 📍.
+      if (!isPlanned && post.photoUrl) {
         inner.style.backgroundImage = `url('${post.photoUrl}')`;
         inner.style.backgroundSize = 'cover';
         inner.style.backgroundPosition = 'center';
+      } else if (post.index != null) {
+        inner.innerHTML = `<span style="font-weight:800;font-size:${isActive ? 22 : 16}px;color:#e07a5f;">${post.index}</span>`;
+      } else if (isPlanned) {
+        inner.innerHTML = '<span style="font-weight:800;font-size:18px;">&#8982;</span>';
       } else {
         inner.innerHTML = '📍';
       }
       el.appendChild(inner);
 
       el.addEventListener('mouseenter', () => {
-        inner.style.transform = 'scale(1.15)';
+        inner.style.transform = 'scale(1.35)';
         if (!isActive) el.style.zIndex = '10';
+        onHoverPost?.(post.id);
       });
       el.addEventListener('mouseleave', () => {
         inner.style.transform = 'scale(1)';
         if (!isActive) el.style.zIndex = '1';
+        onHoverPost?.(null);
       });
 
       const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
@@ -215,7 +229,7 @@ export function MapView({
       const active = posts.find((p) => p.id === activeId);
       if (active) map.easeTo({ center: [active.longitude, active.latitude], duration: 500 });
     }
-  }, [posts, activeId, onSelectPost]);
+  }, [posts, activeId, onSelectPost, onHoverPost]);
 
   // Latest syncMarkers, callable from the one-time map-load handler.
   const syncRef = useRef(null);

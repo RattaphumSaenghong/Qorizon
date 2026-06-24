@@ -36,7 +36,11 @@ export function useCreateBooking(tripId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateBookingRequest) => createBooking(input),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: bookingKeys.list(tripId) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: bookingKeys.list(tripId) });
+      // booking may have created a logistics stop in the itinerary
+      if (tripId) queryClient.invalidateQueries({ queryKey: ['stops', 'trip', tripId] });
+    },
   });
 }
 

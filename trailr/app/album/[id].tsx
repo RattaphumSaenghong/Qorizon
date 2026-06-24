@@ -3,7 +3,7 @@
  *   Grid    : GPS trail map + location-clustered photo grid (AlbumA)
  *   Scrapbook: two-page diary spread, paginated by day (JournalC)
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -14,24 +14,29 @@ import {
   ActivityIndicator,
   Modal,
   TextInput,
+  Image,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useAlbum, useTrail, useUpdateAlbum } from '@trailr/db';
-import type { AlbumItem } from '@trailr/db';
+import { useAlbum, useTrail, useUpdateAlbum, useContributors, usePool, useUploadTripMedia, useUpdateMedia, useDeleteMedia } from '@trailr/db';
+import type { AlbumItem, PoolItem } from '@trailr/db';
+import { MemberSwitcher } from '../../src/components/MemberSwitcher';
 import { colors, spacing, fontSize, radius, shadow } from '../../src/theme/tokens';
 import { Wordmark } from '../../src/components/Wordmark';
 import { Chip } from '../../src/components/Chip';
 import { Btn } from '../../src/components/Btn';
 import { MapView } from '../../src/components/MapView';
+import { MapSheet } from '../../src/components/MapSheet';
 import { ScrapbookSpread } from '../../src/components/ScrapbookSpread';
 import { CoverImage } from '../../src/components/CoverImage';
 import { PressableScale } from '../../src/components/PressableScale';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useCollapsibleSplit } from '../../src/hooks/useCollapsibleSplit';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import { useToast } from '../../src/components/Toast';
 import type { Day, Moment } from '../../src/data/mockTrips';
 
-type ViewMode = 'grid' | 'scrapbook';
+type ViewMode = 'grid' | 'scrapbook' | 'pool';
 
 interface Cluster {
   title: string;
@@ -157,6 +162,100 @@ function ClusterGrid({ clusters, editing, onToggleExclude, onEditCaption }: Clus
   );
 }
 
+// ── Pool grid ────────────────────────────────────────────────
+interface PoolGridProps {
+  items: PoolItem[];
+  myUserId?: string;
+  includedIds: Set<string>;
+  onToggleInclude: (item: PoolItem) => void;
+  onToggleVisibility: (item: PoolItem) => void;
+  onDelete: (item: PoolItem) => void;
+  onAdd: () => void;
+  isUploading: boolean;
+}
+function PoolGrid({ items, myUserId, includedIds, onToggleInclude, onToggleVisibility, onDelete, onAdd, isUploading }: PoolGridProps) {
+  if (items.length === 0 && !myUserId) {
+    return (
+      <View style={styles.empty}>
+        <Text style={styles.emptyText}>No shared photos yet.</Text>
+      </View>
+    );
+  }
+  return (
+    <ScrollView contentContainerStyle={styles.gridContent}>
+      {myUserId && (
+        <TouchableOpacity style={styles.addPhotoBtn} onPress={onAdd} disabled={isUploading}>
+          {isUploading
+            ? <ActivityIndicator color={colors.acc} />
+            : <Text style={styles.addPhotoText}>+ Add photos to pool</Text>
+          }
+        </TouchableOpacity>
+      )}
+      <View style={styles.photoGrid}>
+        {items.map((item) => {
+          const isMine = item.user_id === myUserId;
+          const isIncluded = includedIds.has(item.id);
+          return (
+            <View key={item.id} style={styles.photoCell}>
+              <View style={styles.photoCellInner}>
+                {item.cdn_url || item.url ? (
+                  <Image
+                    source={{ uri: item.cdn_url ?? item.url }}
+                    style={styles.photoCellImg}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Text style={styles.photoCellLabel}>{item.type}</Text>
+                )}
+                {item.visibility === 'private' && (
+                  <View style={styles.hiddenBadge}>
+                    <Text style={styles.hiddenBadgeText}>private</Text>
+                  </View>
+                )}
+                {item.location_name && (
+                  <View style={styles.poolLocBadge}>
+                    <Text style={styles.poolLocText} numberOfLines={1}>{item.location_name}</Text>
+                  </View>
+                )}
+              </View>
+              <View style={styles.poolActions}>
+                {!isMine && item.visibility === 'shared' && (
+                  <TouchableOpacity
+                    style={[styles.poolActionBtn, isIncluded && styles.poolActionBtnActive]}
+                    onPress={() => onToggleInclude(item)}
+                  >
+                    <Text style={[styles.poolActionText, isIncluded && styles.poolActionTextActive]}>
+                      {isIncluded ? '✓ In album' : '＋ Add'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+                {isMine && (
+                  <>
+                    <TouchableOpacity
+                      style={styles.poolActionBtn}
+                      onPress={() => onToggleVisibility(item)}
+                    >
+                      <Text style={styles.poolActionText}>
+                        {item.visibility === 'shared' ? '🔒 Hide' : '🌐 Share'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.poolActionBtn, styles.poolActionBtnDanger]}
+                      onPress={() => onDelete(item)}
+                    >
+                      <Text style={styles.poolActionText}>✕</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    </ScrollView>
+  );
+}
+
 // ── Main screen ──────────────────────────────────────────────
 export default function AlbumScreen() {
   const router = useRouter();
@@ -165,19 +264,81 @@ export default function AlbumScreen() {
 
   const user = useAuthStore((s) => s.user);
   const [editing, setEditing] = useState(false);
-  const { data: album, isLoading, error } = useAlbum(tripId, editing);
-  const { data: trail = [] } = useTrail(tripId);
+  // Whose album is shown. null = owner's (the canonical/public view); default to
+  // your own once we know you have memory on this trip.
+  const [selectedMember, setSelectedMember] = useState<string | null>(null);
+  const { data: contributors = [] } = useContributors(tripId);
+  useEffect(() => {
+    if (selectedMember === null && user && contributors.some((c) => c.id === user.id)) {
+      setSelectedMember(user.id);
+    }
+  }, [contributors, user, selectedMember]);
+
+  const { data: album, isLoading, error } = useAlbum(tripId, { member: selectedMember, includeExcluded: editing });
+  const { data: trail = [] } = useTrail(tripId, selectedMember);
   const update = useUpdateAlbum(tripId);
+  const { data: poolItems = [], isLoading: poolLoading } = usePool(tripId);
+  const uploadToPool = useUploadTripMedia(tripId);
+  const updateMedia = useUpdateMedia(tripId);
+  const deleteMedia = useDeleteMedia(tripId);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [currentDay, setCurrentDay] = useState(0);
   // Collapse the photo grid → map-focused (animated 70/30 ↔ 30/70).
   const { focused: mapFocus, toggle: toggleMapFocus, contentWidth } = useCollapsibleSplit();
+  const { isPhone } = useResponsive();
   const toast = useToast();
   const [captionItem, setCaptionItem] = useState<AlbumItem | null>(null);
   const [captionText, setCaptionText] = useState('');
 
   const items = album?.items ?? [];
-  const isOwner = !!user && !!album && user.id === album.trip.user_id;
+  // You can edit only your OWN album (the one whose author is you).
+  const canEdit = !!user && !!album && user.id === album.author.id;
+
+  // Pool items from other members that appear in my album items = included
+  const includedIds = useMemo(() => {
+    const albumMediaIds = new Set(items.map((i) => i.media_id));
+    return new Set(
+      poolItems.filter((p) => p.user_id !== user?.id && albumMediaIds.has(p.id)).map((p) => p.id),
+    );
+  }, [items, poolItems, user?.id]);
+
+  const pickAndUpload = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { toast('Camera roll permission required'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.85,
+      base64: true,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0];
+    const base64 = asset.base64 ?? '';
+    uploadToPool.mutate({
+      type: 'photo',
+      content_base64: `data:image/jpeg;base64,${base64}`,
+      content_type: 'image/jpeg',
+      visibility: 'shared',
+    });
+  };
+
+  const toggleInclude = (item: PoolItem) => {
+    const next = includedIds.has(item.id)
+      ? Array.from(includedIds).filter((id) => id !== item.id)
+      : [...Array.from(includedIds), item.id];
+    update.mutate({ included: next });
+  };
+
+  const toggleVisibility = (item: PoolItem) => {
+    updateMedia.mutate({
+      mediaId: item.id,
+      input: { visibility: item.visibility === 'shared' ? 'private' : 'shared' },
+    });
+  };
+
+  const removeFromPool = (item: PoolItem) => {
+    deleteMedia.mutate(item.id);
+  };
+  const effectiveMember = album?.author.id ?? selectedMember;
   const clusters = useMemo(() => clusterByLocation(items), [items]);
   // Scrapbook reads the published album only (never the hidden ones).
   const days = useMemo(() => deriveDays(items.filter((i) => !i.excluded)), [items]);
@@ -234,10 +395,28 @@ export default function AlbumScreen() {
       ? { latitude: trailCoords[0][1], longitude: trailCoords[0][0] }
       : { latitude: 13.7563, longitude: 100.5018 };
 
+  // The scrapbook spread is a wide two-page layout — phone falls back to grid (but pool is always available).
+  const effectiveView: ViewMode = isPhone && viewMode === 'scrapbook' ? 'grid' : viewMode;
+
+  const mapBlock = (
+    <MapView
+      initialLatitude={center.latitude}
+      initialLongitude={center.longitude}
+      initialZoom={11}
+      posts={pins}
+      trail={trailCoords}
+      route={photoRoute}
+    >
+      <View style={styles.mapNote}>
+        <Text style={styles.mapNoteText}>📍 matched to your route</Text>
+      </View>
+    </MapView>
+  );
+
   return (
     <View style={styles.root}>
       {/* ── Header ── */}
-      <View style={styles.header}>
+      <View style={[styles.header, isPhone && styles.headerPhone]}>
         <Wordmark size={22} />
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backText}>‹ back</Text>
@@ -249,6 +428,12 @@ export default function AlbumScreen() {
             {album.count} photos
           </Chip>
         )}
+        <MemberSwitcher
+          members={contributors}
+          selectedId={effectiveMember}
+          currentUserId={user?.id}
+          onSelect={(id) => { setSelectedMember(id); if (id !== user?.id) setEditing(false); }}
+        />
         <View style={{ flex: 1 }} />
 
         {/* view toggle */}
@@ -261,17 +446,27 @@ export default function AlbumScreen() {
               ▦ Grid
             </Text>
           </TouchableOpacity>
+          {!isPhone && (
+            <TouchableOpacity
+              style={[styles.toggleBtn, viewMode === 'scrapbook' && styles.toggleBtnActive]}
+              onPress={() => setViewMode('scrapbook')}
+            >
+              <Text style={[styles.toggleLabel, viewMode === 'scrapbook' && styles.toggleLabelActive]}>
+                ✦ Scrapbook
+              </Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
-            style={[styles.toggleBtn, viewMode === 'scrapbook' && styles.toggleBtnActive]}
-            onPress={() => setViewMode('scrapbook')}
+            style={[styles.toggleBtn, viewMode === 'pool' && styles.toggleBtnActive]}
+            onPress={() => setViewMode('pool')}
           >
-            <Text style={[styles.toggleLabel, viewMode === 'scrapbook' && styles.toggleLabelActive]}>
-              ✦ Scrapbook
+            <Text style={[styles.toggleLabel, viewMode === 'pool' && styles.toggleLabelActive]}>
+              ⊕ Pool
             </Text>
           </TouchableOpacity>
         </View>
 
-        {isOwner && (
+        {canEdit && (
           <Btn sm onPress={() => setEditing((e) => !e)}>{editing ? 'Done' : 'Edit'}</Btn>
         )}
         <Btn solid sm onPress={onShareAlbum}>Share album</Btn>
@@ -286,22 +481,39 @@ export default function AlbumScreen() {
         <View style={styles.empty}>
           <Text style={styles.emptyText}>Couldn't load album.</Text>
         </View>
-      ) : viewMode === 'grid' ? (
+      ) : effectiveView === 'pool' ? (
+        poolLoading ? (
+          <View style={styles.empty}><ActivityIndicator color={colors.acc} size="large" /></View>
+        ) : (
+          <PoolGrid
+            items={poolItems}
+            myUserId={user?.id}
+            includedIds={includedIds}
+            onToggleInclude={toggleInclude}
+            onToggleVisibility={toggleVisibility}
+            onDelete={removeFromPool}
+            onAdd={pickAndUpload}
+            isUploading={uploadToPool.isPending}
+          />
+        )
+      ) : effectiveView === 'grid' && isPhone ? (
+        /* ── Phone: full-width grid + map in a bottom sheet ── */
+        <View style={styles.phoneBody}>
+          <View style={styles.phoneGrid}>
+            <ClusterGrid
+              clusters={clusters}
+              editing={editing}
+              onToggleExclude={toggleExclude}
+              onEditCaption={openCaption}
+            />
+          </View>
+          <MapSheet title={`🗺  Photo map · ${pins.length}`}>{mapBlock}</MapSheet>
+        </View>
+      ) : effectiveView === 'grid' ? (
         <View style={styles.gridBody}>
           {/* GPS trail map (fills remaining width) */}
           <Animated.View style={[styles.mapCol, styles.mapColFill]}>
-            <MapView
-              initialLatitude={center.latitude}
-              initialLongitude={center.longitude}
-              initialZoom={11}
-              posts={pins}
-              trail={trailCoords}
-              route={photoRoute}
-            >
-              <View style={styles.mapNote}>
-                <Text style={styles.mapNoteText}>📍 matched to your route</Text>
-              </View>
-            </MapView>
+            {mapBlock}
             {/* collapse handle — toggles grid/map split between 70/30 and 30/70 */}
             <PressableScale style={styles.collapseHandle} onPress={toggleMapFocus}>
               <Text style={styles.collapseHandleIcon}>{mapFocus ? '‹' : '›'}</Text>
@@ -397,6 +609,16 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.line,
     flexShrink: 0,
   },
+  // Phone: let the busy header wrap to two rows instead of clipping.
+  headerPhone: {
+    height: undefined,
+    minHeight: 56,
+    flexWrap: 'wrap',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  phoneBody: { flex: 1 },
+  phoneGrid: { flex: 1 },
   backBtn: { paddingVertical: 4 },
   backText: { color: colors.sub, fontSize: fontSize.sm },
   separator: { width: 1, height: 20, backgroundColor: colors.line, marginHorizontal: 4 },
@@ -570,6 +792,51 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   addCaptionText: { fontSize: fontSize.sm, color: colors.sub, textAlign: 'center' },
+  addPhotoBtn: {
+    borderWidth: 1.5,
+    borderColor: colors.acc,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  addPhotoText: { color: colors.acc, fontWeight: '600', fontSize: fontSize.sm },
+  poolLocBadge: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(44,42,38,0.6)',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+  },
+  poolLocText: { fontSize: fontSize.xs, color: colors.white },
+  poolActions: {
+    flexDirection: 'row',
+    gap: 4,
+    marginTop: 4,
+  },
+  poolActionBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.sm,
+    paddingVertical: 3,
+    alignItems: 'center',
+  },
+  poolActionBtnActive: {
+    borderColor: colors.acc,
+    backgroundColor: colors.accSoft,
+  },
+  poolActionBtnDanger: {
+    flex: 0,
+    paddingHorizontal: 8,
+    borderColor: colors.line,
+  },
+  poolActionText: { fontSize: fontSize.xs, color: colors.sub },
+  poolActionTextActive: { color: colors.acc, fontWeight: '600' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyText: { color: colors.sub, fontSize: fontSize.md },
 

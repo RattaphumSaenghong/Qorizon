@@ -4,27 +4,44 @@
  */
 import React, { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { DateRangePicker } from '../src/components/DateRangePicker';
 import { useRouter } from 'expo-router';
-import { createTrip } from '@trailr/db';
+import { useCreateTrip, ApiError } from '@trailr/db';
+import type { TransportMode } from '@trailr/db';
 import { colors, spacing, fontSize, radius } from '../src/theme/tokens';
 import { Wordmark } from '../src/components/Wordmark';
 import { Btn } from '../src/components/Btn';
 import { PressableScale } from '../src/components/PressableScale';
 import { useAuthStore } from '../src/stores/authStore';
 import { useToast } from '../src/components/Toast';
+import { tripHref } from '../src/lib/tripHref';
+import { todayYMD } from '../src/lib/date';
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+type TripMode = 'plan' | 'log';
+
+const TRANSPORT_OPTIONS: Array<{ value: TransportMode; label: string }> = [
+  { value: 'mixed', label: 'Mixed' },
+  { value: 'train', label: 'Train' },
+  { value: 'transit', label: 'Transit' },
+  { value: 'car', label: 'Car' },
+  { value: 'walk', label: 'Walk' },
+];
 
 export default function NewTripScreen() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const toast = useToast();
+  const createTripMut = useCreateTrip();
 
   const [destination, setDestination] = useState('');
-  const [start, setStart] = useState('');
-  const [end, setEnd] = useState('');
+  const [start, setStart] = useState<string | null>(null);
+  const [end, setEnd] = useState<string | null>(null);
   const [budget, setBudget] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [mode, setMode] = useState<TripMode>('plan');
+  const [transportMode, setTransportMode] = useState<TransportMode>('mixed');
+  const today = todayYMD();
+  const isLogging = mode === 'log';
 
   if (!user) {
     return (
@@ -41,28 +58,35 @@ export default function NewTripScreen() {
     const budgetNum = budget.trim() ? parseInt(budget.replace(/[^0-9]/g, ''), 10) : null;
     setSubmitting(true);
     try {
-      const trip = await createTrip({
+      const trip = await createTripMut.mutateAsync({
         user_id: user.id,
         title: dest,
         destination: dest,
         description: null,
         cover_image_url: null,
-        status: 'draft',
+        status: isLogging ? 'completed' : 'draft',
         stage: 'planning',
+        transport_mode: transportMode,
         budget: Number.isFinite(budgetNum as number) ? (budgetNum as number) : null,
         budget_currency: 'THB',
         live_mode: false,
         live_cadence: 'daily',
         visibility: 'private',
         forked_from_id: null,
-        start_date: DATE_RE.test(start.trim()) ? start.trim() : null,
-        end_date: DATE_RE.test(end.trim()) ? end.trim() : null,
-        album_overrides: null,
+        start_date: start,
+        end_date: end,
+        backdated: isLogging,
       });
-      toast('Trip created — start planning!');
-      router.replace(`/builder/${trip.id}`);
+      toast(isLogging ? 'Past trip created - add your stops.' : 'Trip created - start planning!');
+      router.replace(tripHref(trip));
     } catch (e) {
-      toast('Could not create trip — please try again');
+      // Surface validation errors (e.g. date range too long / inverted) so the
+      // user knows what to fix; fall back to a generic message otherwise.
+      const msg =
+        e instanceof ApiError && e.status === 400
+          ? e.message
+          : 'Could not create trip — please try again';
+      toast(msg);
       setSubmitting(false);
     }
   };
@@ -80,8 +104,23 @@ export default function NewTripScreen() {
 
       <ScrollView contentContainerStyle={styles.body}>
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Where are you headed?</Text>
-          <Text style={styles.cardSub}>Stage 1 of 3 · Planning</Text>
+          <View style={styles.modeToggle}>
+            <PressableScale
+              style={[styles.modeBtn, mode === 'plan' && styles.modeBtnActive]}
+              onPress={() => { setMode('plan'); setStart(null); setEnd(null); }}
+            >
+              <Text style={[styles.modeText, mode === 'plan' && styles.modeTextActive]}>Plan a trip</Text>
+            </PressableScale>
+            <PressableScale
+              style={[styles.modeBtn, mode === 'log' && styles.modeBtnActive]}
+              onPress={() => { setMode('log'); setStart(null); setEnd(null); }}
+            >
+              <Text style={[styles.modeText, mode === 'log' && styles.modeTextActive]}>Log a past trip</Text>
+            </PressableScale>
+          </View>
+
+          <Text style={styles.cardTitle}>{isLogging ? 'Where did you go?' : 'Where are you headed?'}</Text>
+          <Text style={styles.cardSub}>{isLogging ? 'Logging a past trip' : 'Stage 1 of 3 - Planning'}</Text>
 
           <Text style={styles.label}>Destination</Text>
           <TextInput
@@ -93,27 +132,31 @@ export default function NewTripScreen() {
             autoFocus
           />
 
-          <View style={styles.row}>
-            <View style={styles.col}>
-              <Text style={styles.label}>Start date</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.sub}
-                value={start}
-                onChangeText={setStart}
-              />
-            </View>
-            <View style={styles.col}>
-              <Text style={styles.label}>End date</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.sub}
-                value={end}
-                onChangeText={setEnd}
-              />
-            </View>
+          <Text style={styles.label}>Dates (optional)</Text>
+          <DateRangePicker
+            startDate={start}
+            endDate={end}
+            onChange={(s, e) => { setStart(s); setEnd(e); }}
+            minDate={isLogging ? undefined : today}
+            maxDate={isLogging ? today : undefined}
+          />
+
+          <Text style={styles.label}>Getting around</Text>
+          <View style={styles.transportGrid}>
+            {TRANSPORT_OPTIONS.map((opt) => {
+              const active = transportMode === opt.value;
+              return (
+                <PressableScale
+                  key={opt.value}
+                  style={[styles.transportChip, active && styles.transportChipActive]}
+                  onPress={() => setTransportMode(opt.value)}
+                >
+                  <Text style={[styles.transportChipText, active && styles.transportChipTextActive]}>
+                    {opt.label}
+                  </Text>
+                </PressableScale>
+              );
+            })}
           </View>
 
           <Text style={styles.label}>Budget (optional)</Text>
@@ -130,9 +173,13 @@ export default function NewTripScreen() {
           </View>
 
           <Btn solid full onPress={create} loading={submitting} disabled={!destination.trim()} style={styles.createBtn}>
-            Create trip
+            {isLogging ? 'Create logged trip' : 'Create trip'}
           </Btn>
-          <Text style={styles.hint}>You'll add stops, dates and friends on the planning board next.</Text>
+          <Text style={styles.hint}>
+            {isLogging
+              ? "You'll add past stops in the builder, then publish it as an album."
+              : "You'll add stops, dates and friends on the planning board next."}
+          </Text>
         </View>
       </ScrollView>
     </View>
@@ -158,10 +205,43 @@ const styles = StyleSheet.create({
 
   body: { padding: spacing.xl, alignItems: 'center' },
   card: { width: '100%', maxWidth: 520, gap: spacing.sm },
+  modeToggle: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.pill,
+    backgroundColor: colors.panel,
+    marginBottom: spacing.md,
+  },
+  modeBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+  },
+  modeBtnActive: { backgroundColor: colors.paper },
+  modeText: { fontSize: fontSize.sm, color: colors.sub, fontWeight: '700' },
+  modeTextActive: { color: colors.ink },
   cardTitle: { fontSize: fontSize.xl, fontWeight: '800', color: colors.ink },
   cardSub: { fontSize: fontSize.sm, color: colors.acc, fontWeight: '600', marginBottom: spacing.md },
 
   label: { fontSize: fontSize.sm, color: colors.sub, marginTop: spacing.md, fontWeight: '600' },
+  transportGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  transportChip: {
+    minWidth: 88,
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.panel,
+  },
+  transportChipActive: { borderColor: colors.acc, backgroundColor: colors.accSoft },
+  transportChipText: { fontSize: fontSize.sm, color: colors.sub, fontWeight: '700' },
+  transportChipTextActive: { color: colors.ink },
   input: {
     borderWidth: 1,
     borderColor: colors.line,
@@ -172,8 +252,6 @@ const styles = StyleSheet.create({
     color: colors.ink,
     backgroundColor: colors.panel,
   },
-  row: { flexDirection: 'row', gap: spacing.md },
-  col: { flex: 1 },
   budgetRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   currency: {
     paddingHorizontal: spacing.md,
