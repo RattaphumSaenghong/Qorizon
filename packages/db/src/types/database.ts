@@ -33,6 +33,9 @@ export interface FlightSummary {
   carrier_name: string | null;
   flight_number: string | null;
   stops: number;
+  // Provider's true elapsed time (e.g. ISO "PT6H7M"). Authoritative — dep_at/arr_at
+  // are tz-naive local times, so wall-clock subtraction between them is wrong across timezones.
+  duration?: string | null;
 }
 
 export interface FlightSegment {

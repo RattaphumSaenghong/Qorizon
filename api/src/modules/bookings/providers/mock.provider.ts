@@ -51,6 +51,7 @@ export class MockFlightProvider implements FlightProviderApi {
           carrier_name: a.name,
           flight_number: flightNumber,
           stops: a.stops,
+          duration: formatDuration(a.durationMins),
           segments: [segment],
           index: i,
         },

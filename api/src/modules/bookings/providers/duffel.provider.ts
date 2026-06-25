@@ -135,6 +135,7 @@ export class DuffelFlightProvider implements FlightProviderApi {
           carrier_name: carrierName,
           flight_number: flightNumber,
           stops,
+          duration: slice?.duration ?? null,
           departing_at: departingAt,
           arriving_at: arrivingAt,
           segments: itinerary,

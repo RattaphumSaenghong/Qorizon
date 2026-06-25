@@ -36,6 +36,7 @@ export function extractFlightSummary(meta?: Record<string, unknown> | null): Fli
   const carrierName = stringValue(meta.carrier_name) ?? stringValue(first?.carrier_name);
   const flightNumber = stringValue(meta.flight_number) ?? stringValue(first?.flight_number);
   const stops = Math.max(0, Math.round(numberValue(meta.stops) ?? Math.max(0, segments.length - 1)));
+  const duration = stringValue(meta.duration);
 
   if (!origin && !destination && !depAt && !arrAt) return null;
   return {
@@ -47,6 +48,7 @@ export function extractFlightSummary(meta?: Record<string, unknown> | null): Fli
     carrier_name: carrierName,
     flight_number: flightNumber,
     stops,
+    duration,
   };
 }
 

@@ -9,6 +9,7 @@ import { PressableScale } from '../../src/components/PressableScale';
 import { TopBar } from '../../src/components/TopBar';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useToast } from '../../src/components/Toast';
+import { flightRowLine } from '../../src/lib/bookingDisplay';
 import { colors, fontSize, radius, shadow, spacing } from '../../src/theme/tokens';
 
 function todayPlus(days: number): string {
@@ -39,7 +40,7 @@ function FlightOfferCard({ offer, booking, onBook }: { offer: BookingOffer; book
     <View style={styles.offerCard}>
       <View style={styles.offerMain}>
         <Text style={styles.offerTitle}>{offer.title}</Text>
-        <Text style={styles.offerSub}>{offer.subtitle}</Text>
+        <Text style={styles.offerSub}>{(offer.type === 'flight' ? flightRowLine(offer.meta) : null) ?? offer.subtitle}</Text>
       </View>
       <Text style={styles.price}>{money(offer.amount_thb)}</Text>
       <Btn solid sm onPress={onBook} loading={booking}>Book</Btn>
