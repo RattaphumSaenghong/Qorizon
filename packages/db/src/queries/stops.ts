@@ -15,6 +15,11 @@ export async function fetchUserMapStops(userId: string): Promise<StopWithMedia[]
   return request<StopWithMedia[]>('GET', `/users/${userId}/map-stops`);
 }
 
+/** Stops the current user has liked, newest first. */
+export async function fetchLikedStops(): Promise<StopWithMedia[]> {
+  return request<StopWithMedia[]>('GET', '/stops/liked');
+}
+
 /** Home feed: recent VISITED stops from people the user follows. */
 export async function fetchFeedStops(_userId: string, limit = 30): Promise<FeedStop[]> {
   return request<FeedStop[]>('GET', `/feed/stops?limit=${limit}`);

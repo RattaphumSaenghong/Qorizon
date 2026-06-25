@@ -2,12 +2,13 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   Param,
   Patch,
   Post,
 } from '@nestjs/common';
-import type { LikeStateResponse, StopRow } from '@trailr/shared';
+import type { LikeStateResponse, StopRow, StopWithMedia } from '@trailr/shared';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { StopsService } from './stops.service';
 import { CreateStopDto } from './dto/create-stop.dto';
@@ -16,6 +17,11 @@ import { UpdateStopDto } from './dto/update-stop.dto';
 @Controller('stops')
 export class StopsController {
   constructor(private readonly stops: StopsService) {}
+
+  @Get('liked')
+  liked(@CurrentUser() userId: string): Promise<StopWithMedia[]> {
+    return this.stops.getLikedStops(userId);
+  }
 
   @Post()
   create(@CurrentUser() userId: string, @Body() dto: CreateStopDto): Promise<StopRow> {

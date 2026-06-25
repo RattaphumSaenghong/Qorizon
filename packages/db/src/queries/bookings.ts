@@ -1,5 +1,6 @@
 import { request } from '../http';
 import type {
+  BookingDetailRow,
   BookingOffer,
   BookingRow,
   CreateBookingRequest,
@@ -20,6 +21,11 @@ export async function createBooking(input: CreateBookingRequest): Promise<Bookin
 export async function fetchBookings(tripId?: string): Promise<BookingRow[]> {
   const q = tripId ? `?trip_id=${tripId}` : '';
   return request<BookingRow[]>('GET', `/bookings${q}`);
+}
+
+/** A single booking with its provider meta and confirmation payload. */
+export async function fetchBooking(id: string): Promise<BookingDetailRow> {
+  return request<BookingDetailRow>('GET', `/bookings/${id}`);
 }
 
 export async function confirmBooking(id: string): Promise<BookingRow> {

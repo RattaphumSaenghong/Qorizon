@@ -5,6 +5,7 @@ import { colors, fontSize, radius, shadow, spacing } from '../theme/tokens';
 import { Btn } from './Btn';
 import { Chip } from './Chip';
 import { PressableScale } from './PressableScale';
+import { moneyThb, offerNightlyThb } from '../lib/bookingDisplay';
 
 interface Props {
   visible: boolean;
@@ -16,16 +17,6 @@ interface Props {
   onBook: () => void;
   onAddToTrip: () => void;
   onClose: () => void;
-}
-
-function money(n?: number): string {
-  return n == null ? 'Price unavailable' : `${n.toLocaleString()} THB`;
-}
-
-function nightly(offer?: BookingOffer): string | null {
-  const nights = Number(offer?.meta?.['nights'] ?? 0);
-  if (!offer || !Number.isFinite(nights) || nights <= 0) return null;
-  return `${Math.round(offer.amount_thb / nights).toLocaleString()} THB/night`;
 }
 
 export function HotelDetailSheet({
@@ -40,7 +31,7 @@ export function HotelDetailSheet({
   onClose,
 }: Props) {
   if (!hotel) return null;
-  const perNight = nightly(offer);
+  const perNight = offerNightlyThb(offer);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -59,7 +50,7 @@ export function HotelDetailSheet({
           <View style={styles.tags}>
             {hotel.rating != null ? <Chip dot={false}>{`Rating ${hotel.rating}`}</Chip> : null}
             {hotel.stars != null ? <Chip dot={false}>{`${hotel.stars} star`}</Chip> : null}
-            <Chip dot={false}>{offer ? money(offer.amount_thb) : 'Catalog only'}</Chip>
+            <Chip dot={false}>{offer ? moneyThb(offer.amount_thb) : 'Catalog only'}</Chip>
             {perNight ? <Chip dot={false}>{perNight}</Chip> : null}
           </View>
 

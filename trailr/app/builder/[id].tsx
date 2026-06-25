@@ -25,7 +25,7 @@ import { CoverImage } from '../../src/components/CoverImage';
 import { MapView } from '../../src/components/MapView';
 import { MapSheet } from '../../src/components/MapSheet';
 import { PressableScale } from '../../src/components/PressableScale';
-import { useInventory, useTrip, useTripStops, useUpdateTrip, useAddTripDay, useUpdateTripDay, useDeleteTripDay, fetchTripDays, createStop, updateStop, deleteStop, useTripMembers } from '@trailr/db';
+import { useBookings, useCreateBooking, useHotelRecommendations, useInventory, useLikedStops, useSaved, useTrip, useTripStops, useUpdateTrip, useAddTripDay, useUpdateTripDay, useDeleteTripDay, fetchTripDays, createStop, updateStop, deleteStop, useTripMembers } from '@trailr/db';
 import {
   DndContext,
   DragOverlay,
@@ -37,7 +37,7 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import type { StopWithMedia, TripDayRow } from '@trailr/db';
+import type { BookingRow, HotelRecommendation, StopWithMedia, TripDayRow } from '@trailr/db';
 import { useAuthStore } from '../../src/stores/authStore';
 import { useToast } from '../../src/components/Toast';
 import { useResponsive } from '../../src/hooks/useResponsive';
@@ -50,7 +50,6 @@ import type { AssigneeMember } from '../../src/components/WhoForControl';
 import { PaidByControl } from '../../src/components/PaidByControl';
 import { MemberSwitcher } from '../../src/components/MemberSwitcher';
 import { BookingSearchModal } from '../../src/components/BookingSearchModal';
-import { HotelRecsSheet } from '../../src/components/HotelRecsSheet';
 import { computeSettlement } from '../../src/lib/budget';
 import { suggestPlaces, retrievePlace, newSessionToken, type PlaceSuggestion } from '../../src/lib/places';
 
@@ -59,6 +58,15 @@ type Suggestion = PlaceSuggestion;
 const CATEGORIES = ['place', 'food', 'landmark', 'activity', 'hotel', 'flight', 'transport', 'note'] as const;
 type Category = (typeof CATEGORIES)[number];
 type LogisticsType = 'flight' | 'hotel';
+type StaySort = 'score' | 'price' | 'distance' | 'transit';
+type BuilderSideTab = 'stays' | 'backpack';
+
+const STAY_SORTS: { key: StaySort; label: string }[] = [
+  { key: 'score', label: 'Best' },
+  { key: 'price', label: 'Price' },
+  { key: 'distance', label: 'Near stops' },
+  { key: 'transit', label: 'Transit' },
+];
 
 interface BuilderDay {
   id: string;
@@ -71,6 +79,31 @@ interface BuilderDay {
 interface Coord {
   latitude: number;
   longitude: number;
+}
+
+function sortStayRecs(items: HotelRecommendation[], sort: StaySort): HotelRecommendation[] {
+  const copy = [...items];
+  if (sort === 'price') return copy.sort((a, b) => a.nightly_thb - b.nightly_thb);
+  if (sort === 'distance') return copy.sort((a, b) => a.avg_km_to_stops - b.avg_km_to_stops);
+  if (sort === 'transit') {
+    return copy.sort((a, b) => (a.station_meters ?? Infinity) - (b.station_meters ?? Infinity));
+  }
+  return copy.sort((a, b) => b.score - a.score);
+}
+
+function stayPriceLabel(n: number): string {
+  if (n >= 1000) return `${Math.round(n / 100) / 10}k`;
+  return String(n);
+}
+
+function parsePositiveInt(text: string): number | undefined {
+  const n = Number(text.replace(/[^0-9]/g, ''));
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined;
+}
+
+function bookingTitle(booking: BookingRow): string {
+  if (booking.title) return booking.title;
+  return booking.type === 'flight' ? 'Flight booking' : 'Hotel booking';
 }
 
 function isLogistics(stop: StopWithMedia): boolean {
@@ -350,6 +383,9 @@ export default function BuilderScreen() {
   const { data: memberItems = [] } = useTripMembers(tripId);
   const { data: flightInventory = [] } = useInventory('flight');
   const { data: stayInventory = [] } = useInventory('hotel');
+  const { data: savedItems = [] } = useSaved();
+  const { data: likedStops = [] } = useLikedStops();
+  const { data: bookedItems = [] } = useBookings();
   const assigneeMembers: AssigneeMember[] = memberItems
     .filter((m) => m.status === 'accepted')
     .map((m) => ({
@@ -407,7 +443,18 @@ export default function BuilderScreen() {
   const [filterMemberId, setFilterMemberId] = useState<string | null>(null);
   const [bookingType, setBookingType] = useState<LogisticsType>('flight');
   const [bookingOpen, setBookingOpen] = useState(false);
-  const [recsOpen, setRecsOpen] = useState(false);
+  const [sideTabs, setSideTabs] = useState<BuilderSideTab[]>([]);
+  const [activeSideTab, setActiveSideTab] = useState<BuilderSideTab>('stays');
+  const [staySearchActive, setStaySearchActive] = useState(false);
+  const [stayCheckIn, setStayCheckIn] = useState('');
+  const [stayCheckOut, setStayCheckOut] = useState('');
+  const [stayGuests, setStayGuests] = useState('2');
+  const [stayNightlyCap, setStayNightlyCap] = useState('');
+  const [staySort, setStaySort] = useState<StaySort>('score');
+  const [selectedStayOfferId, setSelectedStayOfferId] = useState<string | null>(null);
+  const [hoveredStayOfferId, setHoveredStayOfferId] = useState<string | null>(null);
+  const [addingStayOfferId, setAddingStayOfferId] = useState<string | null>(null);
+  const [addingBackpackId, setAddingBackpackId] = useState<string | null>(null);
 
   // Debounced autocomplete when formLoc changes (skip if change came from a selection).
   useEffect(() => {
@@ -493,6 +540,45 @@ export default function BuilderScreen() {
           ),
     [stayStops, filterMemberId],
   );
+  const backpackStops = useMemo(() => {
+    const byId = new Map<string, StopWithMedia>();
+    for (const item of savedItems) {
+      if (item.stop?.location_name && item.stop.latitude != null && item.stop.longitude != null) {
+        byId.set(item.stop.id, item.stop);
+      }
+    }
+    for (const stop of likedStops) {
+      if (stop.location_name && stop.latitude != null && stop.longitude != null) {
+        byId.set(stop.id, stop);
+      }
+    }
+    return [...byId.values()];
+  }, [likedStops, savedItems]);
+  const stayPanelOpen = sideTabs.includes('stays');
+  const sidePanelOpen = sideTabs.length > 0;
+  const firstDate = dayRows.find((d: TripDayRow) => d.date)?.date ?? trip?.start_date ?? null;
+  const tripNights = Math.max(1, dayRows.length);
+  const lastDate = trip?.end_date ?? null;
+  const stayParams = useMemo(
+    () => ({
+      check_in: stayCheckIn.trim() || firstDate || undefined,
+      check_out: stayCheckOut.trim() || lastDate || undefined,
+      guests: parsePositiveInt(stayGuests),
+      nightly_cap: parsePositiveInt(stayNightlyCap),
+    }),
+    [firstDate, lastDate, stayCheckIn, stayCheckOut, stayGuests, stayNightlyCap],
+  );
+  const stayRecsQ = useHotelRecommendations(tripId, stayParams, stayPanelOpen && staySearchActive);
+  const createStayBooking = useCreateBooking(tripId);
+  const stayItems = useMemo(
+    () => sortStayRecs(stayRecsQ.data?.items ?? [], staySort),
+    [stayRecsQ.data?.items, staySort],
+  );
+
+  useEffect(() => {
+    if (!stayCheckIn && firstDate) setStayCheckIn(firstDate);
+    if (!stayCheckOut && lastDate) setStayCheckOut(lastDate);
+  }, [firstDate, lastDate, stayCheckIn, stayCheckOut]);
 
   const closeForm = () => {
     setFormOpen(false);
@@ -542,6 +628,28 @@ export default function BuilderScreen() {
     setBookingOpen(true);
   };
 
+  const openSideTab = (tab: BuilderSideTab) => {
+    setSideTabs((prev) => (prev.includes(tab) ? prev : [...prev, tab]));
+    setActiveSideTab(tab);
+  };
+
+  const closeSideTab = (tab: BuilderSideTab) => {
+    setSideTabs((prev) => {
+      const next = prev.filter((t) => t !== tab);
+      if (activeSideTab === tab) setActiveSideTab(next[next.length - 1] ?? 'stays');
+      return next;
+    });
+    if (tab === 'stays') {
+      setSelectedStayOfferId(null);
+      setHoveredStayOfferId(null);
+    }
+  };
+
+  const openStaySearch = () => {
+    openSideTab('stays');
+    setStaySearchActive(true);
+  };
+
   const openManualLogistics = (type: LogisticsType) => {
     setBookingOpen(false);
     openAdd(undefined, undefined, type === 'hotel' ? trip?.destination ?? '' : '', type);
@@ -549,6 +657,103 @@ export default function BuilderScreen() {
 
   const openInventory = (type: LogisticsType) => {
     router.push(`/inventory?type=${type}`);
+  };
+
+  const addBackpackStop = async (stop: StopWithMedia) => {
+    if (addingBackpackId) return;
+    setAddingBackpackId(`post:${stop.id}`);
+    try {
+      await createStop({
+        trip_id: tripId,
+        day_id: null,
+        user_id: userId,
+        status: 'planned',
+        category: (CATEGORIES.includes(stop.category as Category) ? stop.category : 'place') as Category,
+        location_name: stop.location_name ?? 'Saved place',
+        latitude: stop.latitude ?? null,
+        longitude: stop.longitude ?? null,
+        place_id: stop.place_id ?? null,
+        planned_start: null,
+        planned_end: null,
+        duration_mins: null,
+        cost: null,
+        sort_order: unassigned.length,
+        notes: 'from this post',
+        caption: null,
+        captured_at: null,
+        batch_date: null,
+        scope: 'shared',
+      });
+      refreshStops();
+      toast('Location added to Unsorted');
+    } catch {
+      toast('Could not add location');
+    } finally {
+      setAddingBackpackId(null);
+    }
+  };
+
+  const addBackpackBooking = async (booking: BookingRow) => {
+    if (addingBackpackId) return;
+    setAddingBackpackId(`booking:${booking.id}`);
+    try {
+      await createStop({
+        trip_id: tripId,
+        day_id: null,
+        user_id: userId,
+        status: 'planned',
+        category: booking.type,
+        location_name: bookingTitle(booking),
+        latitude: null,
+        longitude: null,
+        place_id: null,
+        planned_start: null,
+        planned_end: null,
+        duration_mins: null,
+        cost: booking.amount_thb == null ? null : Math.round(booking.amount_thb),
+        sort_order: unassigned.length,
+        notes: 'from booking',
+        caption: null,
+        captured_at: null,
+        batch_date: null,
+        scope: 'shared',
+      });
+      refreshStops();
+      toast('Booking added to Unsorted');
+    } catch {
+      toast('Could not add booking');
+    } finally {
+      setAddingBackpackId(null);
+    }
+  };
+
+  const addRecommendedStay = (rec: HotelRecommendation) => {
+    setAddingStayOfferId(rec.offer_id);
+    createStayBooking.mutate(
+      {
+        type: 'hotel',
+        provider: rec.provider,
+        trip_id: tripId,
+        external_ref: rec.offer_id,
+        amount_thb: rec.total_thb,
+        title: rec.name,
+        meta: {
+          nightly_thb: rec.nightly_thb,
+          latitude: rec.latitude,
+          longitude: rec.longitude,
+          ...(rec.station_name ? { station_name: rec.station_name } : {}),
+          ...(rec.station_meters != null ? { station_meters: rec.station_meters } : {}),
+        },
+      },
+      {
+        onSuccess: () => {
+          refreshStops();
+          toast('Stay added to planner');
+        },
+        onError: () => toast('Could not add stay'),
+        onSettled: () => setAddingStayOfferId(null),
+      },
+    );
   };
 
   const openEdit = (s: StopWithMedia) => {
@@ -800,7 +1005,17 @@ export default function BuilderScreen() {
 
   // Stops in itinerary order (days first, then unassigned) that have coordinates —
   // drives the numbered pins, their order labels, and the planned route line.
-  type Pin = { id: string; latitude: number; longitude: number; location: string; caption: string; index?: number; photoUrl?: string };
+  type Pin = {
+    id: string;
+    latitude: number;
+    longitude: number;
+    location: string;
+    caption: string;
+    index?: number;
+    photoUrl?: string;
+    priceLabel?: string;
+    markerKind?: 'visited' | 'planned';
+  };
   const orderedStops = [...days.flatMap((d) => d.stops), ...unassigned].filter(
     (s) => s.latitude != null && s.longitude != null,
   );
@@ -824,6 +1039,19 @@ export default function BuilderScreen() {
       photoUrl: s.media?.[0]?.cdn_url ?? s.media?.[0]?.url,
     }));
   pins.push(...stayPins);
+  const staySearchPins: Pin[] =
+    stayPanelOpen && staySearchActive
+      ? stayItems.map((rec) => ({
+          id: `stay:${rec.offer_id}`,
+          latitude: rec.latitude,
+          longitude: rec.longitude,
+          location: rec.name,
+          caption: rec.why,
+          priceLabel: stayPriceLabel(rec.nightly_thb),
+          markerKind: 'planned',
+        }))
+      : [];
+  pins.push(...staySearchPins);
   if (formCoord && !editing) {
     pins.push({ id: '__pending__', latitude: formCoord.latitude, longitude: formCoord.longitude, location: 'New stop', caption: '' });
   }
@@ -832,14 +1060,8 @@ export default function BuilderScreen() {
   const orderIndex = new Map(orderedStops.map((s, i) => [s.id, i + 1]));
   const mapCenter = pins[0] ? { latitude: pins[0].latitude, longitude: pins[0].longitude } : null;
   const fallback = { latitude: 35.0116, longitude: 135.7681 };
-  const firstDate = dayRows.find((d: TripDayRow) => d.date)?.date ?? null;
-  const tripNights = Math.max(1, dayRows.length);
-  const lastDate = trip.end_date ?? null;
-  // "Suggest stays" needs an anchor (≥2 pinned attractions, excluding logistics) + a known date.
-  const attractionPins = stops.filter(
-    (s) => !['hotel', 'flight', 'transport'].includes(s.category) && s.latitude != null && s.longitude != null,
-  );
-  const canSuggest = attractionPins.length >= 2 && !!(firstDate ?? trip.start_date);
+  const activeStayId = hoveredStayOfferId ?? selectedStayOfferId;
+  const mapActiveId = activeStayId ? `stay:${activeStayId}` : selectedStopId;
 
   const dragStop = dragActiveId ? stops.find((s) => s.id === dragActiveId) : null;
 
@@ -892,13 +1114,12 @@ export default function BuilderScreen() {
             stops={filteredStayStops}
             currency={currency}
             selectedStopId={selectedStopId}
-            onAdd={openBooking}
+            onAdd={() => openStaySearch()}
             onInbox={openInventory}
             onSelect={setSelectedStopId}
             onEdit={openEdit}
             onRemove={removeStop}
             inboxCount={stayInventory.length}
-            onSuggest={canSuggest ? () => setRecsOpen(true) : undefined}
             onExplore={() => router.push(`/book/stays?tripId=${tripId}`)}
           />
         </View>
@@ -1018,6 +1239,268 @@ export default function BuilderScreen() {
     </DndContext>
   );
 
+  const stayTabContent = (
+    <>
+      <View style={styles.sidePanelHeader}>
+        <View style={styles.stayPanelTitleWrap}>
+          <Text style={styles.stayPanelTitle}>Stays</Text>
+          <Text style={styles.stayPanelSub}>
+            {stayRecsQ.isFetching
+              ? 'Searching...'
+              : staySearchActive && stayRecsQ.data
+                ? `${stayItems.length} ranked - ${stayRecsQ.data.nights} night${stayRecsQ.data.nights === 1 ? '' : 's'}`
+                : 'Ranked for this trip'}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.stayFilters}>
+        <View style={styles.stayFilterRow}>
+          <View style={styles.stayField}>
+            <Text style={styles.stayLabel}>Check-in</Text>
+            <TextInput
+              style={styles.stayInput}
+              value={stayCheckIn}
+              onChangeText={setStayCheckIn}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={colors.sub}
+            />
+          </View>
+          <View style={styles.stayField}>
+            <Text style={styles.stayLabel}>Check-out</Text>
+            <TextInput
+              style={styles.stayInput}
+              value={stayCheckOut}
+              onChangeText={setStayCheckOut}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={colors.sub}
+            />
+          </View>
+        </View>
+        <View style={styles.stayFilterRow}>
+          <View style={styles.stayFieldSmall}>
+            <Text style={styles.stayLabel}>Guests</Text>
+            <TextInput
+              style={styles.stayInput}
+              value={stayGuests}
+              onChangeText={setStayGuests}
+              keyboardType="numeric"
+              placeholder="2"
+              placeholderTextColor={colors.sub}
+            />
+          </View>
+          <View style={styles.stayField}>
+            <Text style={styles.stayLabel}>Max/night</Text>
+            <TextInput
+              style={styles.stayInput}
+              value={stayNightlyCap}
+              onChangeText={setStayNightlyCap}
+              keyboardType="numeric"
+              placeholder={stayRecsQ.data?.nightly_cap_thb != null ? stayRecsQ.data.nightly_cap_thb.toLocaleString() : 'No cap'}
+              placeholderTextColor={colors.sub}
+            />
+          </View>
+          <Btn
+            sm
+            solid
+            onPress={() => {
+              setStaySearchActive(true);
+              if (staySearchActive) void stayRecsQ.refetch();
+            }}
+            loading={stayRecsQ.isFetching}
+          >
+            Search
+          </Btn>
+        </View>
+      </View>
+
+      <View style={styles.staySortRow}>
+        {STAY_SORTS.map((s) => (
+          <PressableScale
+            key={s.key}
+            style={[styles.staySortChip, staySort === s.key && styles.staySortChipActive]}
+            onPress={() => setStaySort(s.key)}
+            accessibilityLabel={`Sort stays by ${s.label}`}
+          >
+            <Text style={[styles.staySortText, staySort === s.key && styles.staySortTextActive]}>{s.label}</Text>
+          </PressableScale>
+        ))}
+      </View>
+
+      <ScrollView contentContainerStyle={styles.stayList}>
+        {stayRecsQ.isError ? (
+          <Text style={styles.stayEmpty}>Could not load stays. Check the API and try again.</Text>
+        ) : stayRecsQ.isFetching && !stayRecsQ.data ? (
+          <ActivityIndicator color={colors.acc} style={styles.stayLoading} />
+        ) : stayRecsQ.data?.multi_area ? (
+          <View style={styles.stayNotice}>
+            <Text style={styles.stayNoticeTitle}>Too spread out for one stay</Text>
+            <Text style={styles.stayNoticeText}>Split the trip into areas, then search stays for each area.</Text>
+          </View>
+        ) : staySearchActive && stayItems.length === 0 ? (
+          <Text style={styles.stayEmpty}>Add at least two pinned attractions and trip dates, then search again.</Text>
+        ) : !staySearchActive ? (
+          <Text style={styles.stayEmpty}>Search to see ranked stays on the map.</Text>
+        ) : (
+          stayItems.map((rec) => {
+            const active = rec.offer_id === selectedStayOfferId || rec.offer_id === hoveredStayOfferId;
+            return (
+              <PressableScale
+                key={rec.offer_id}
+                style={[styles.stayCard, active && styles.stayCardActive]}
+                onPress={() => setSelectedStayOfferId(rec.offer_id)}
+                onHoverIn={() => setHoveredStayOfferId(rec.offer_id)}
+                onHoverOut={() => setHoveredStayOfferId(null)}
+                accessibilityLabel={`Select ${rec.name}`}
+              >
+                <View style={styles.stayCardMain}>
+                  <View style={styles.stayCardTop}>
+                    <Text style={styles.stayName} numberOfLines={1}>{rec.name}</Text>
+                    <Text style={styles.stayScore}>{Math.round(rec.score * 100)}</Text>
+                  </View>
+                  <Text style={styles.stayWhy} numberOfLines={2}>{rec.why}</Text>
+                  <View style={styles.stayMetaRow}>
+                    <Chip dot={false}>{`${rec.nightly_thb.toLocaleString()} THB/night`}</Chip>
+                    <Chip dot={false}>{`${rec.avg_km_to_stops} km avg`}</Chip>
+                    {rec.rating != null ? <Chip dot={false}>{`Rating ${rec.rating}`}</Chip> : null}
+                  </View>
+                </View>
+                <Btn
+                  sm
+                  solid
+                  onPress={() => addRecommendedStay(rec)}
+                  loading={addingStayOfferId === rec.offer_id}
+                >
+                  Add
+                </Btn>
+              </PressableScale>
+            );
+          })
+        )}
+      </ScrollView>
+    </>
+  );
+
+  const backpackTabContent = (
+    <>
+      <View style={styles.sidePanelHeader}>
+        <View style={styles.stayPanelTitleWrap}>
+          <Text style={styles.stayPanelTitle}>Backpack</Text>
+          <Text style={styles.stayPanelSub}>Saved, liked, and booked things you can bring into this trip.</Text>
+        </View>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.backpackContent}>
+        <View style={styles.backpackSection}>
+          <Text style={styles.backpackSectionTitle}>Post locations</Text>
+          {backpackStops.length === 0 ? (
+            <Text style={styles.backpackEmpty}>Like or save posts with locations to bring them here.</Text>
+          ) : (
+            backpackStops.map((stop) => {
+              const photoUri = stop.media?.[0]?.cdn_url ?? stop.media?.[0]?.url;
+              return (
+                <View key={stop.id} style={styles.backpackCard}>
+                  <View style={styles.backpackPhoto}>
+                    <CoverImage
+                      uri={photoUri}
+                      style={styles.backpackPhotoImg}
+                      labelStyle={styles.backpackPhotoLabel}
+                      label="post"
+                    />
+                  </View>
+                  <View style={styles.backpackCardMain}>
+                    <Text style={styles.backpackName} numberOfLines={1}>{stop.location_name ?? 'Saved place'}</Text>
+                    <Text style={styles.backpackMeta} numberOfLines={1}>from this post</Text>
+                    {stop.caption || stop.notes ? (
+                      <Text style={styles.backpackCopy} numberOfLines={2}>{stop.caption ?? stop.notes}</Text>
+                    ) : null}
+                  </View>
+                  <Btn
+                    sm
+                    solid
+                    onPress={() => void addBackpackStop(stop)}
+                    loading={addingBackpackId === `post:${stop.id}`}
+                  >
+                    Add
+                  </Btn>
+                </View>
+              );
+            })
+          )}
+        </View>
+
+        <View style={styles.backpackSection}>
+          <Text style={styles.backpackSectionTitle}>Bookings</Text>
+          {bookedItems.length === 0 ? (
+            <Text style={styles.backpackEmpty}>Booked hotels and flights will show up here.</Text>
+          ) : (
+            bookedItems.map((booking) => {
+              const isFlight = booking.type === 'flight';
+              return (
+                <View key={booking.id} style={styles.backpackCard}>
+                  <View style={[styles.backpackBookingIcon, isFlight && styles.backpackFlightIcon]}>
+                    <Text style={styles.backpackBookingIconText}>{isFlight ? 'Flight' : 'Stay'}</Text>
+                  </View>
+                  <View style={styles.backpackCardMain}>
+                    <Text style={styles.backpackName} numberOfLines={1}>{bookingTitle(booking)}</Text>
+                    <Text style={styles.backpackMeta} numberOfLines={1}>
+                      {booking.status}
+                      {booking.amount_thb != null ? ` - ${booking.amount_thb.toLocaleString()} THB` : ''}
+                    </Text>
+                    {isFlight ? (
+                      <Text style={styles.backpackCopy} numberOfLines={1}>Flight details after Duffel integration</Text>
+                    ) : null}
+                  </View>
+                  <Btn
+                    sm
+                    solid
+                    onPress={() => void addBackpackBooking(booking)}
+                    loading={addingBackpackId === `booking:${booking.id}`}
+                  >
+                    Add
+                  </Btn>
+                </View>
+              );
+            })
+          )}
+        </View>
+      </ScrollView>
+    </>
+  );
+
+  const sidePanel = sidePanelOpen ? (
+    <View style={[styles.sidePanel, isPhone && styles.sidePanelPhone]}>
+      <View style={styles.sideTabStrip}>
+        {sideTabs.map((tab) => {
+          const active = tab === activeSideTab;
+          const count = tab === 'backpack' ? backpackStops.length + bookedItems.length : stayItems.length;
+          return (
+            <PressableScale
+              key={tab}
+              style={[styles.sideTab, active && styles.sideTabActive]}
+              onPress={() => setActiveSideTab(tab)}
+              accessibilityLabel={`Open ${tab} tab`}
+            >
+              <Text style={[styles.sideTabText, active && styles.sideTabTextActive]}>
+                {tab === 'stays' ? 'Stays' : `Backpack ${count}`}
+              </Text>
+              <PressableScale
+                style={styles.sideTabClose}
+                onPress={() => closeSideTab(tab)}
+                accessibilityLabel={`Close ${tab} tab`}
+              >
+                <Text style={[styles.sideTabCloseText, active && styles.sideTabTextActive]}>x</Text>
+              </PressableScale>
+            </PressableScale>
+          );
+        })}
+      </View>
+      <View style={styles.sidePanelBody}>
+        {activeSideTab === 'stays' ? stayTabContent : backpackTabContent}
+      </View>
+    </View>
+  ) : null;
+
   const mapBlock = (
     <MapView
       initialLatitude={mapCenter?.latitude ?? fallback.latitude}
@@ -1025,8 +1508,17 @@ export default function BuilderScreen() {
       initialZoom={12}
       posts={pins}
       route={stopRoute}
-      activeId={selectedStopId}
-      onSelectPost={setSelectedStopId}
+      activeId={mapActiveId}
+      onSelectPost={(pinId) => {
+        if (pinId.startsWith('stay:')) {
+          setSelectedStayOfferId(pinId.slice(5));
+          setSelectedStopId(null);
+          return;
+        }
+        setSelectedStayOfferId(null);
+        setSelectedStopId(pinId);
+      }}
+      onHoverPost={(pinId) => setHoveredStayOfferId(pinId?.startsWith('stay:') ? pinId.slice(5) : null)}
       center={mapCenter}
       onMapPress={onMapPress}
     >
@@ -1034,6 +1526,7 @@ export default function BuilderScreen() {
         <Text style={styles.routeInfoTitle}>{trip.title}</Text>
         <Text style={styles.routeInfoSub}>{stops.length} stop{stops.length !== 1 ? 's' : ''} · tap map to add</Text>
       </View>
+      {sidePanel}
     </MapView>
   );
 
@@ -1067,6 +1560,9 @@ export default function BuilderScreen() {
           </PressableScale>
         ) : null}
         {!isPhone && <Chip dot={false}>✓ Auto-saved</Chip>}
+        <Btn sm onPress={() => openSideTab('backpack')}>
+          Backpack {backpackStops.length + bookedItems.length}
+        </Btn>
         {assigneeMembers.length >= 2 && (
           <Btn sm onPress={() => setChatOpen(true)}>💬 Chat</Btn>
         )}
@@ -1116,19 +1612,6 @@ export default function BuilderScreen() {
           toast(bookingType === 'flight' ? 'Flight added to planner' : 'Stay added to planner');
         }}
         onManual={openManualLogistics}
-      />
-
-      <HotelRecsSheet
-        visible={recsOpen}
-        tripId={tripId}
-        firstDate={firstDate}
-        lastDate={lastDate}
-        onClose={() => setRecsOpen(false)}
-        onBooked={() => {
-          setRecsOpen(false);
-          refreshStops();
-          toast('Stay added to planner');
-        }}
       />
 
       {/* Add / edit stop modal */}
@@ -1673,6 +2156,49 @@ const styles = StyleSheet.create({
 
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(44,42,38,0.5)', alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   modalSheet: { width: '100%', maxWidth: 440, backgroundColor: colors.paper, borderRadius: radius.md, padding: spacing.xl, gap: spacing.sm },
+  backpackContent: { gap: spacing.lg, paddingBottom: spacing.sm },
+  backpackSection: { gap: spacing.sm },
+  backpackSectionTitle: { fontSize: fontSize.sm, color: colors.sub, fontWeight: '900', textTransform: 'uppercase' },
+  backpackEmpty: { fontSize: fontSize.sm, color: colors.sub, textAlign: 'center', paddingVertical: spacing.lg },
+  backpackCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.sm,
+    backgroundColor: colors.panel,
+  },
+  backpackPhoto: {
+    width: 72,
+    height: 64,
+    flexShrink: 0,
+    overflow: 'hidden',
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+  },
+  backpackPhotoImg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  backpackPhotoLabel: { fontSize: fontSize.xs, color: colors.sub, fontFamily: 'monospace' },
+  backpackBookingIcon: {
+    width: 58,
+    height: 58,
+    flexShrink: 0,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backpackFlightIcon: { borderStyle: 'dashed' },
+  backpackBookingIconText: { fontSize: fontSize.xs, color: colors.acc, fontWeight: '900', textTransform: 'uppercase' },
+  backpackCardMain: { flex: 1, minWidth: 0, gap: 4 },
+  backpackName: { fontSize: fontSize.sm, color: colors.ink, fontWeight: '800' },
+  backpackMeta: { fontSize: fontSize.xs, color: colors.sub, lineHeight: 16 },
+  backpackCopy: { fontSize: fontSize.xs, color: colors.ink, lineHeight: 16 },
   modalTitle: { fontSize: fontSize.lg, fontWeight: '700', color: colors.ink, marginBottom: spacing.xs },
   locStatus: { backgroundColor: colors.panel, borderRadius: radius.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   locStatusText: { fontSize: fontSize.sm, color: colors.ink },
@@ -1694,7 +2220,7 @@ const styles = StyleSheet.create({
   mapCol: { flex: 1 },
   routeInfo: {
     position: 'absolute',
-    right: 16,
+    left: 16,
     top: 16,
     backgroundColor: colors.paper,
     padding: spacing.md,
@@ -1706,5 +2232,121 @@ const styles = StyleSheet.create({
   },
   routeInfoTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.ink },
   routeInfoSub: { fontSize: fontSize.xs, color: colors.sub },
+  sidePanel: {
+    position: 'absolute',
+    right: 16,
+    top: 16,
+    bottom: 16,
+    width: 390,
+    maxWidth: '48%',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+    overflow: 'hidden',
+    ...shadow.md,
+  },
+  sidePanelPhone: {
+    left: 12,
+    right: 12,
+    top: 12,
+    bottom: 12,
+    width: undefined,
+    maxWidth: '100%',
+  },
+  sideTabStrip: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 2,
+    minHeight: 42,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+    backgroundColor: colors.panel,
+  },
+  sideTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    maxWidth: 168,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderTopLeftRadius: radius.sm,
+    borderTopRightRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bar,
+    marginBottom: -1,
+  },
+  sideTabActive: {
+    backgroundColor: colors.paper,
+    borderBottomColor: colors.paper,
+  },
+  sideTabText: { flex: 1, minWidth: 0, fontSize: fontSize.xs, color: colors.sub, fontWeight: '900' },
+  sideTabTextActive: { color: colors.ink },
+  sideTabClose: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sideTabCloseText: { fontSize: fontSize.xs, color: colors.sub, fontWeight: '900', lineHeight: 14 },
+  sidePanelBody: { flex: 1, padding: spacing.md, gap: spacing.sm },
+  sidePanelHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
+  stayPanelTitleWrap: { flex: 1, minWidth: 0 },
+  stayPanelTitle: { fontSize: fontSize.lg, color: colors.ink, fontWeight: '800' },
+  stayPanelSub: { fontSize: fontSize.xs, color: colors.sub, marginTop: 2 },
+  stayFilters: { gap: spacing.sm },
+  stayFilterRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
+  stayField: { flex: 1, minWidth: 0, gap: 4 },
+  stayFieldSmall: { width: 74, gap: 4 },
+  stayLabel: { fontSize: fontSize.xs, color: colors.sub, fontWeight: '800', textTransform: 'uppercase' },
+  stayInput: {
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    fontSize: fontSize.sm,
+    color: colors.ink,
+    backgroundColor: colors.panel,
+  },
+  staySortRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  staySortChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.panel,
+  },
+  staySortChipActive: { backgroundColor: colors.acc, borderColor: colors.acc },
+  staySortText: { fontSize: fontSize.xs, color: colors.sub, fontWeight: '800' },
+  staySortTextActive: { color: colors.white },
+  stayList: { gap: spacing.sm, paddingBottom: spacing.sm },
+  stayLoading: { paddingVertical: spacing.xl },
+  stayEmpty: { fontSize: fontSize.sm, color: colors.sub, textAlign: 'center', lineHeight: 20, paddingVertical: spacing.lg },
+  stayNotice: { gap: spacing.xs, paddingVertical: spacing.md },
+  stayNoticeTitle: { fontSize: fontSize.base, color: colors.ink, fontWeight: '800' },
+  stayNoticeText: { fontSize: fontSize.sm, color: colors.sub, lineHeight: 20 },
+  stayCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: radius.sm,
+    backgroundColor: colors.panel,
+  },
+  stayCardActive: { borderColor: colors.acc, backgroundColor: colors.accSoft },
+  stayCardMain: { flex: 1, minWidth: 0, gap: 5 },
+  stayCardTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  stayName: { flex: 1, minWidth: 0, fontSize: fontSize.sm, color: colors.ink, fontWeight: '800' },
+  stayScore: { fontSize: fontSize.sm, color: colors.acc, fontWeight: '900' },
+  stayWhy: { fontSize: fontSize.xs, color: colors.sub, lineHeight: 16 },
+  stayMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
 });
 

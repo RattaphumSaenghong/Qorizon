@@ -54,13 +54,13 @@ function SavedCard({ item, onOpen, onRemove, cardStyle }: { item: SavedItem; onO
   );
 }
 
-// Display-only for now — there is no per-booking detail screen (booking/[id] is a
-// trip-scoped booking flow), so the card just summarizes the booking.
-function BookingCard({ booking, cardStyle }: { booking: BookingRow; cardStyle?: ViewStyle }) {
+function BookingCard({ booking, onOpen, cardStyle }: { booking: BookingRow; onOpen: () => void; cardStyle?: ViewStyle }) {
   const isFlight = booking.type === 'flight';
   return (
-    <View
+    <TouchableOpacity
       style={[styles.bookingCard, booking.status === 'cancelled' && styles.bookingCardMuted, cardStyle]}
+      onPress={onOpen}
+      activeOpacity={0.88}
     >
       <View style={styles.bookingIcon}>
         <Text style={styles.bookingIconText}>{isFlight ? 'Flight' : 'Stay'}</Text>
@@ -72,7 +72,7 @@ function BookingCard({ booking, cardStyle }: { booking: BookingRow; cardStyle?: 
         </Text>
       </View>
       <Chip dot={false} accent={booking.status === 'confirmed'}>{booking.status}</Chip>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -160,6 +160,7 @@ export default function SavedScreen() {
                 <BookingCard
                   key={booking.id}
                   booking={booking}
+                  onOpen={() => router.push(`/booking/view/${booking.id}`)}
                   cardStyle={isPhone ? styles.cardPhone : undefined}
                 />
               ))}

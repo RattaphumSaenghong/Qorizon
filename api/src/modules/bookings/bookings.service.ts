@@ -1,6 +1,7 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Booking, Prisma } from '@prisma/client';
 import type {
+  BookingDetailRow,
   BookingOffer,
   BookingProvider,
   BookingRow,
@@ -133,6 +134,12 @@ export class BookingsService {
     return rows.map(toBookingRow);
   }
 
+  async getOne(userId: string, id: string): Promise<BookingDetailRow> {
+    const booking = await this.prisma.booking.findFirst({ where: { id, user_id: userId } });
+    if (!booking) throw new NotFoundException('booking not found');
+    return toBookingDetailRow(booking);
+  }
+
   confirm(userId: string, id: string): Promise<BookingRow> {
     return this.setStatus(userId, id, 'confirmed');
   }
@@ -165,5 +172,20 @@ function toBookingRow(b: Booking): BookingRow {
     commission_thb: b.commission_thb === null ? null : Number(b.commission_thb),
     title: raw.title ?? null,
     created_at: b.created_at.toISOString(),
+  };
+}
+
+function toBookingDetailRow(b: Booking): BookingDetailRow {
+  const raw = (b.raw_payload as {
+    title?: string | null;
+    meta?: Record<string, unknown> | null;
+    confirmation?: Record<string, unknown> | null;
+  } | null) ?? {};
+
+  return {
+    ...toBookingRow(b),
+    stop_id: b.stop_id,
+    meta: raw.meta ?? null,
+    confirmation: raw.confirmation ?? null,
   };
 }

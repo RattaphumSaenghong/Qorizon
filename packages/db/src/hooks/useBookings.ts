@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   searchOffers,
   createBooking,
+  fetchBooking,
   fetchBookings,
   confirmBooking,
   cancelBooking,
@@ -10,6 +11,7 @@ import type { CreateBookingRequest, SearchBookingRequest } from '../types';
 
 export const bookingKeys = {
   list: (tripId?: string) => ['bookings', tripId ?? 'all'] as const,
+  detail: (id: string) => ['bookings', 'detail', id] as const,
   search: (params: SearchBookingRequest) => ['bookings', 'search', params] as const,
 };
 
@@ -32,6 +34,16 @@ export function useBookings(tripId?: string) {
   });
 }
 
+/** A single booking for the detail screen. */
+export function useBooking(id: string) {
+  return useQuery({
+    queryKey: bookingKeys.detail(id),
+    queryFn: () => fetchBooking(id),
+    enabled: !!id,
+    staleTime: 1000 * 30,
+  });
+}
+
 export function useCreateBooking(tripId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -48,7 +60,10 @@ export function useConfirmBooking(tripId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => confirmBooking(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: bookingKeys.list(tripId) }),
+    onSuccess: (row) => {
+      queryClient.invalidateQueries({ queryKey: bookingKeys.list(tripId) });
+      queryClient.invalidateQueries({ queryKey: bookingKeys.detail(row.id) });
+    },
   });
 }
 
@@ -56,6 +71,9 @@ export function useCancelBooking(tripId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => cancelBooking(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: bookingKeys.list(tripId) }),
+    onSuccess: (row) => {
+      queryClient.invalidateQueries({ queryKey: bookingKeys.list(tripId) });
+      queryClient.invalidateQueries({ queryKey: bookingKeys.detail(row.id) });
+    },
   });
 }

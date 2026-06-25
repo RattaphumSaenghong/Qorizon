@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
-import type { BookingOffer, BookingRow } from '@trailr/shared';
+import type { BookingDetailRow, BookingOffer, BookingRow } from '@trailr/shared';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { BookingsService } from './bookings.service';
 import { SearchBookingDto } from './dto/search-booking.dto';
@@ -26,6 +26,12 @@ export class BookingsController {
     @Query('trip_id') tripId?: string,
   ): Promise<BookingRow[]> {
     return this.bookings.list(userId, tripId);
+  }
+
+  // Keep future literal GET routes above this greedy id route.
+  @Get(':id')
+  getOne(@CurrentUser() userId: string, @Param('id') id: string): Promise<BookingDetailRow> {
+    return this.bookings.getOne(userId, id);
   }
 
   @Post(':id/confirm')

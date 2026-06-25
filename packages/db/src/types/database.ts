@@ -240,6 +240,12 @@ export interface BookingRow {
   created_at: string;
 }
 
+export interface BookingDetailRow extends BookingRow {
+  stop_id: string | null;
+  meta: Record<string, unknown> | null;
+  confirmation: Record<string, unknown> | null;
+}
+
 export interface InventoryItemRow {
   id: string;
   user_id: string;

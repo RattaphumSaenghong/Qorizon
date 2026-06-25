@@ -13,6 +13,7 @@ export default function RootLayout() {
         <Stack.Screen name="builder/[id]" options={{ presentation: 'card' }} />
         <Stack.Screen name="album/[id]" options={{ presentation: 'card' }} />
         <Stack.Screen name="booking/[id]" options={{ presentation: 'card' }} />
+        <Stack.Screen name="booking/view/[id]" options={{ presentation: 'card' }} />
         <Stack.Screen name="book/stays" options={{ presentation: 'card' }} />
         <Stack.Screen name="book/flights" options={{ presentation: 'card' }} />
         <Stack.Screen name="profile/[username]" options={{ presentation: 'card' }} />

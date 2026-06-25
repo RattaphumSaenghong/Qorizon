@@ -82,6 +82,15 @@ export class StopsService {
     return stops.map(toStopWithMedia);
   }
 
+  async getLikedStops(userId: string): Promise<StopWithMedia[]> {
+    const likes = await this.prisma.like.findMany({
+      where: { user_id: userId },
+      include: { stop: { include: STOP_INCLUDE } },
+      orderBy: { created_at: 'desc' },
+    });
+    return likes.map((like) => toStopWithMedia(like.stop));
+  }
+
   /** Home feed: recent visited stops from people the user follows. */
   async getFeedStops(userId: string, limit = 30): Promise<FeedStop[]> {
     const follows = await this.prisma.follow.findMany({

@@ -1,9 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchFeedStops, fetchTripStops, toggleLike } from '../queries/stops';
+import { fetchFeedStops, fetchLikedStops, fetchTripStops, toggleLike } from '../queries/stops';
 import type { StopStatus } from '../types';
 
 export const stopKeys = {
   feed: (userId: string) => ['stops', 'feed', userId] as const,
+  liked: ['stops', 'liked'] as const,
   tripStops: (tripId: string, status?: StopStatus) =>
     ['stops', 'trip', tripId, status ?? 'all'] as const,
 };
@@ -25,6 +26,15 @@ export function useTripStops(tripId: string, status?: StopStatus) {
     queryFn: () => fetchTripStops(tripId, status),
     enabled: !!tripId,
     staleTime: 1000 * 60,
+  });
+}
+
+/** Stops the current user has liked. */
+export function useLikedStops() {
+  return useQuery({
+    queryKey: stopKeys.liked,
+    queryFn: fetchLikedStops,
+    staleTime: 1000 * 30,
   });
 }
 
@@ -56,6 +66,7 @@ export function useToggleLike(userId: string) {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: stopKeys.feed(userId) });
+      queryClient.invalidateQueries({ queryKey: stopKeys.liked });
     },
   });
 }
