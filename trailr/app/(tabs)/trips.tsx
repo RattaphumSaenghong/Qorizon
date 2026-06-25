@@ -73,6 +73,7 @@ export default function TripsScreen() {
     if (tab === 'Feed') router.push('/(tabs)/');
     if (tab === 'Explore') router.push('/(tabs)/explore');
     if (tab === 'Saved') router.push('/(tabs)/saved');
+    if (tab === 'Book') router.push('/(tabs)/book');
   };
 
   return (

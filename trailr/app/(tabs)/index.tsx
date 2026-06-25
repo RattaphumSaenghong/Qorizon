@@ -246,6 +246,7 @@ export default function FeedScreen() {
           if (tab === 'Explore') router.push('/(tabs)/explore');
           if (tab === 'Trips') router.push('/(tabs)/trips');
           if (tab === 'Saved') router.push('/(tabs)/saved');
+          if (tab === 'Book') router.push('/(tabs)/book');
         }}
       />
       {isPhone ? (

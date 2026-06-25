@@ -488,6 +488,8 @@ export default function ProfileScreen() {
     if (tab === 'Feed') router.push('/(tabs)/');
     if (tab === 'Explore') router.push('/(tabs)/explore');
     if (tab === 'Trips') router.push('/(tabs)/trips');
+    if (tab === 'Saved') router.push('/(tabs)/saved');
+    if (tab === 'Book') router.push('/(tabs)/book');
   };
 
   if (!profile) {

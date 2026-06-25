@@ -35,7 +35,7 @@ interface Props {
 
 export function TopBar({
   active = 'Feed',
-  tabs = ['Feed', 'Explore', 'Trips', 'Saved'],
+  tabs = ['Feed', 'Explore', 'Trips', 'Saved', 'Book'],
   showRight = true,
   onTabPress,
 }: Props) {

@@ -26,6 +26,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="explore" options={{ title: 'Explore', tabBarIcon: icon('🧭') }} />
       <Tabs.Screen name="trips" options={{ title: 'Trips', tabBarIcon: icon('🗺️') }} />
       <Tabs.Screen name="saved" options={{ title: 'Saved', tabBarIcon: icon('🔖') }} />
+      <Tabs.Screen name="book" options={{ title: 'Book', tabBarIcon: icon('B') }} />
     </Tabs>
   );
 }

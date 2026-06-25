@@ -105,7 +105,7 @@ export default function ExploreScreen() {
   const grid = (
     <ScrollView style={styles.gridCol} contentContainerStyle={[styles.gridContent, isPhone && styles.gridContentPhone]}>
       <View style={styles.categories}>
-        <TouchableOpacity onPress={() => router.push('/explore-stays')}>
+        <TouchableOpacity onPress={() => router.push('/book/stays')}>
           <Chip dot={false} accent>Explore stays</Chip>
         </TouchableOpacity>
         {CATEGORIES.map((c) => (
@@ -149,6 +149,7 @@ export default function ExploreScreen() {
           if (tab === 'Feed') router.push('/(tabs)/');
           if (tab === 'Trips') router.push('/(tabs)/trips');
           if (tab === 'Saved') router.push('/(tabs)/saved');
+          if (tab === 'Book') router.push('/(tabs)/book');
         }}
       />
       {isPhone ? (

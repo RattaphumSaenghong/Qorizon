@@ -8,16 +8,16 @@ import {
   useHotelRates,
 } from '@trailr/db';
 import type { BookingOffer, HotelCatalogQuery, HotelPin, HotelRatesQuery } from '@trailr/db';
-import { Btn } from '../src/components/Btn';
-import { HotelDetailSheet } from '../src/components/HotelDetailSheet';
-import { MapView } from '../src/components/MapView';
-import { PressableScale } from '../src/components/PressableScale';
-import { TopBar } from '../src/components/TopBar';
-import { useDebouncedValue } from '../src/hooks/useDebouncedValue';
-import { usePlaceSuggestions } from '../src/hooks/usePlaceSuggestions';
-import { useToast } from '../src/components/Toast';
-import { useAuthStore } from '../src/stores/authStore';
-import { colors, fontSize, radius, shadow, spacing } from '../src/theme/tokens';
+import { Btn } from '../../src/components/Btn';
+import { HotelDetailSheet } from '../../src/components/HotelDetailSheet';
+import { MapView } from '../../src/components/MapView';
+import { PressableScale } from '../../src/components/PressableScale';
+import { TopBar } from '../../src/components/TopBar';
+import { useDebouncedValue } from '../../src/hooks/useDebouncedValue';
+import { usePlaceSuggestions } from '../../src/hooks/usePlaceSuggestions';
+import { useToast } from '../../src/components/Toast';
+import { useAuthStore } from '../../src/stores/authStore';
+import { colors, fontSize, radius, shadow, spacing } from '../../src/theme/tokens';
 
 const PRICE_THRESHOLD = 40;
 const MAX_RADIUS_M = 20_000;
@@ -224,12 +224,13 @@ export default function ExploreStaysScreen() {
   return (
     <View style={styles.root}>
       <TopBar
-        active="Explore"
+        active="Book"
         onTabPress={(tab) => {
           if (tab === 'Feed') router.push('/(tabs)/');
           if (tab === 'Explore') router.push('/(tabs)/explore');
           if (tab === 'Trips') router.push('/(tabs)/trips');
           if (tab === 'Saved') router.push('/(tabs)/saved');
+          if (tab === 'Book') router.push('/(tabs)/book');
         }}
       />
 

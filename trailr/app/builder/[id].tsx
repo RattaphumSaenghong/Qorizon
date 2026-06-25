@@ -899,7 +899,7 @@ export default function BuilderScreen() {
             onRemove={removeStop}
             inboxCount={stayInventory.length}
             onSuggest={canSuggest ? () => setRecsOpen(true) : undefined}
-            onExplore={() => router.push(`/explore-stays?tripId=${tripId}`)}
+            onExplore={() => router.push(`/book/stays?tripId=${tripId}`)}
           />
         </View>
         {days.length === 0 && unassigned.length === 0 ? (

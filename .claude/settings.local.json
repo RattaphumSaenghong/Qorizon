@@ -100,7 +100,8 @@
       "Bash(node smoke-e2e.mjs)",
       "Bash(node smoke-recs2.mjs)",
       "Bash(git check-ignore *)",
-      "Bash(grep -iE \"\\\\.env$|/dist/\")"
+      "Bash(grep -iE \"\\\\.env$|/dist/\")",
+      "Bash(node -e \"const p=require\\('./trailr/package.json'\\);console.log\\('scripts:',JSON.stringify\\(p.scripts\\)\\);console.log\\('expo:',p.dependencies&&p.dependencies.expo\\)\")"
     ]
   }
 }
