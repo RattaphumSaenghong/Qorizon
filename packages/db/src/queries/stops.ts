@@ -67,6 +67,7 @@ export async function updateStop(
     paid_by: string | null;
     sort_order: number;
     notes: string;
+    meta: Record<string, unknown> | null;
     caption: string;
   }>,
 ): Promise<StopRow> {

@@ -95,6 +95,10 @@ export class DuffelFlightProvider implements FlightProviderApi {
       const destCode = lastSeg?.destination?.iata_code ?? slice?.destination?.iata_code ?? destination;
       const departingAt = firstSeg?.departing_at ?? null;
       const arrivingAt = lastSeg?.arriving_at ?? null;
+      const carrier = firstSeg?.marketing_carrier?.iata_code ?? null;
+      const carrierName = firstSeg?.marketing_carrier?.name ?? offer.owner?.name ?? null;
+      const flightNumber = firstSeg?.marketing_carrier_flight_number ?? null;
+      const stops = Math.max(0, segments.length - 1);
       const itinerary = segments.map((s) => ({
         origin: s.origin?.iata_code ?? null,
         destination: s.destination?.iata_code ?? null,
@@ -125,6 +129,12 @@ export class DuffelFlightProvider implements FlightProviderApi {
           passenger_ids: Array.from(new Set(passengerIds)),
           origin: originCode,
           destination: destCode,
+          dep_at: departingAt,
+          arr_at: arrivingAt,
+          carrier,
+          carrier_name: carrierName,
+          flight_number: flightNumber,
+          stops,
           departing_at: departingAt,
           arriving_at: arrivingAt,
           segments: itinerary,

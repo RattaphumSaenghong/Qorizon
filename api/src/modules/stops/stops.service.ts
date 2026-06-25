@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import type { FeedStop, StopRow, StopStatus, StopWithMedia } from '@trailr/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PolicyService } from '../../authz/policy.service';
@@ -8,6 +8,7 @@ import { UpdateStopDto } from './dto/update-stop.dto';
 import { toStopRow, toStopWithMedia } from './stop.mapper';
 import { computeFeedEligible } from './feed-eligibility';
 import { AUTHOR_SELECT } from '../../common/prisma-selects';
+import { extractFlightSummary, flightDepartsOutsideTripWindow } from '../bookings/flight-itinerary';
 
 const ASSIGNEES_INCLUDE = {
   assignees: { include: { user: { select: AUTHOR_SELECT } } },
@@ -154,18 +155,31 @@ export class StopsService {
 
   async create(userId: string, dto: CreateStopDto): Promise<StopRow> {
     await this.policy.assertOwnsTrip(userId, dto.trip_id);
-    const { captured_at, assignee_ids, scope, ...rest } = dto;
+    const { captured_at, assignee_ids, scope, meta, ...rest } = dto;
+    let stopMeta = meta;
+    if ((rest.category ?? 'place') === 'flight') {
+      const summary = extractFlightSummary(stopMeta ?? null);
+      const trip = await this.prisma.trip.findUnique({
+        where: { id: dto.trip_id },
+        select: { start_date: true, end_date: true },
+      });
+      if (trip && flightDepartsOutsideTripWindow(trip, summary?.dep_at)) {
+        throw new BadRequestException('flight departure is outside this trip date range');
+      }
+      stopMeta = summary as unknown as Record<string, unknown> | null;
+    }
     const resolvedScope = assignee_ids && assignee_ids.length > 0 ? 'assigned' : (scope ?? 'shared');
     const stop = await this.prisma.stop.create({
       data: {
         ...rest,
         user_id: userId,
         scope: resolvedScope,
+        meta: prismaJsonOrUndefined(stopMeta),
         captured_at: captured_at ? new Date(captured_at) : undefined,
         ...(resolvedScope === 'assigned' && assignee_ids?.length
           ? { assignees: { create: assignee_ids.map((uid) => ({ user_id: uid })) } }
           : {}),
-      },
+      } as Prisma.StopUncheckedCreateInput,
       include: ASSIGNEES_INCLUDE,
     });
     const feed_eligible = await this.recomputeFeedEligibility(stop.id);
@@ -175,7 +189,7 @@ export class StopsService {
   async update(userId: string, stopId: string, dto: UpdateStopDto): Promise<StopRow> {
     const tripId = await this.stopTripId(stopId);
     await this.policy.assertOwnsTrip(userId, tripId);
-    const { captured_at, assignee_ids, scope, ...rest } = dto;
+    const { captured_at, assignee_ids, scope, meta, ...rest } = dto;
     const resolvedScope = assignee_ids !== undefined
       ? (assignee_ids.length > 0 ? 'assigned' : 'shared')
       : scope;
@@ -185,11 +199,12 @@ export class StopsService {
       data: {
         ...rest,
         ...(resolvedScope !== undefined ? { scope: resolvedScope } : {}),
+        ...(meta !== undefined ? { meta: prismaJsonOrUndefined(meta) } : {}),
         captured_at: captured_at ? new Date(captured_at) : undefined,
         ...(assignee_ids !== undefined
           ? { assignees: { deleteMany: {}, ...(assignee_ids.length > 0 ? { create: assignee_ids.map((uid) => ({ user_id: uid })) } : {}) } }
           : {}),
-      },
+      } as Prisma.StopUncheckedUpdateInput,
       include: ASSIGNEES_INCLUDE,
     });
     const feed_eligible = await this.recomputeFeedEligibility(stop.id);
@@ -293,4 +308,10 @@ export class StopsService {
     if (!stop) throw new NotFoundException('stop not found');
     return stop.trip_id;
   }
+}
+
+function prismaJsonOrUndefined(value: Record<string, unknown> | null | undefined): Prisma.InputJsonValue | typeof Prisma.JsonNull | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return Prisma.JsonNull;
+  return value as Prisma.InputJsonValue;
 }

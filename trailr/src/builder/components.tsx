@@ -12,6 +12,7 @@ import { CoverImage } from '../components/CoverImage';
 import { PressableScale } from '../components/PressableScale';
 import { styles } from './styles';
 import type { LogisticsType } from './helpers';
+import { flightRowLine } from '../lib/bookingDisplay';
 
 export const StopCard = React.memo(function StopCard({
   stop,
@@ -219,7 +220,7 @@ export const LogisticsBlock = React.memo(function LogisticsBlock({
           const selected = stop.id === selectedStopId;
           const hasLocation = stop.latitude != null && stop.longitude != null;
           const detail = type === 'flight'
-            ? [stop.planned_start, stop.planned_end].filter(Boolean).join(' - ') || stop.notes || 'Flight details'
+            ? (flightRowLine(stop.meta) ?? [stop.planned_start, stop.planned_end].filter(Boolean).join(' - ')) || stop.notes || 'Flight details'
             : stop.notes || (hasLocation ? 'Pinned on map' : 'Stay details');
           return (
             <View key={stop.id} style={[styles.logisticsCard, selected && styles.logisticsCardSelected]}>

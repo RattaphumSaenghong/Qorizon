@@ -16,6 +16,7 @@ import { Chip } from './Chip';
 import { DatePicker } from './DatePicker';
 import { PressableScale } from './PressableScale';
 import { WhoForControl, type AssigneeMember } from './WhoForControl';
+import { flightRowLine } from '../lib/bookingDisplay';
 
 /** A tappable field that reveals an inline calendar; keeps the sheet compact. */
 function DateField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
@@ -292,11 +293,13 @@ export function BookingSearchModal({
             ) : submitted && offers.length === 0 && !offersQ.isFetching ? (
               <Text style={styles.emptyText}>No offers found. Try changing the search, or add it manually.</Text>
             ) : (
-              offers.map((offer) => (
+              offers.map((offer) => {
+                const subtitle = offer.type === 'flight' ? flightRowLine(offer.meta) ?? offer.subtitle : offer.subtitle;
+                return (
                 <View key={offer.id} style={styles.offerCard}>
                   <View style={styles.offerMain}>
                     <Text style={styles.offerTitle} numberOfLines={1}>{offer.title}</Text>
-                    <Text style={styles.offerSubtitle} numberOfLines={2}>{offer.subtitle}</Text>
+                    <Text style={styles.offerSubtitle} numberOfLines={2}>{subtitle}</Text>
                     <View style={styles.offerMeta}>
                       <Chip dot={false}>{offerLabel(offer)}</Chip>
                       <Chip dot={false}>{money(offer.amount_thb)}</Chip>
@@ -306,7 +309,8 @@ export function BookingSearchModal({
                     Add
                   </Btn>
                 </View>
-              ))
+                );
+              })
             )}
           </ScrollView>
         </PressableScale>

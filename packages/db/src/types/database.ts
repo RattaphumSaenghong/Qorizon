@@ -24,6 +24,27 @@ export type NotificationType = 'live_batch' | 'follow' | 'like' | 'comment' | 't
 export type InventoryStatus = 'unmatched' | 'matched' | 'dismissed';
 export type UserLanguage = 'th' | 'en';
 
+export interface FlightSummary {
+  origin: string;
+  destination: string;
+  dep_at: string | null;
+  arr_at: string | null;
+  carrier: string | null;
+  carrier_name: string | null;
+  flight_number: string | null;
+  stops: number;
+}
+
+export interface FlightSegment {
+  origin: string | null;
+  destination: string | null;
+  departing_at: string | null;
+  arriving_at: string | null;
+  carrier: string | null;
+  carrier_name: string | null;
+  flight_number: string | null;
+}
+
 // ── Row types ────────────────────────────────────────────────
 
 export interface UserRow {
@@ -127,6 +148,7 @@ export interface StopRow {
   paid_by: string | null;
   sort_order: number;
   notes: string | null;
+  meta: Record<string, unknown> | null;
   // story face
   caption: string | null;
   captured_at: string | null;
@@ -393,8 +415,8 @@ export type InsertTrip = Omit<TripRow, 'id' | 'created_at' | 'updated_at' | 'for
 };
 export type InsertTripDay = Omit<TripDayRow, 'id'> & { id?: string };
 export type InsertStop =
-  Omit<StopRow, 'id' | 'created_at' | 'updated_at' | 'like_count' | 'comment_count' | 'feed_eligible' | 'category' | 'status' | 'sort_order' | 'scope' | 'assignees' | 'paid_by'>
-  & { id?: string; category?: StopCategory; status?: StopStatus; sort_order?: number; scope?: StopScope; assignee_ids?: string[]; paid_by?: string };
+  Omit<StopRow, 'id' | 'created_at' | 'updated_at' | 'like_count' | 'comment_count' | 'feed_eligible' | 'category' | 'status' | 'sort_order' | 'scope' | 'assignees' | 'paid_by' | 'meta'>
+  & { id?: string; category?: StopCategory; status?: StopStatus; sort_order?: number; scope?: StopScope; assignee_ids?: string[]; paid_by?: string; meta?: Record<string, unknown> | null };
 export type InsertMedia = Omit<MediaRow, 'id' | 'created_at'> & { id?: string };
 export type InsertComment = Omit<CommentRow, 'id' | 'created_at'> & { id?: string };
 export type InsertBooking = Omit<BookingRow, 'id' | 'created_at'> & { id?: string };

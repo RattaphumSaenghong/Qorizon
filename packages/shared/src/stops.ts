@@ -41,6 +41,7 @@ export interface StopRow {
   paid_by: string | null;
   sort_order: number;
   notes: string | null;
+  meta: Record<string, unknown> | null;
   caption: string | null;
   captured_at: string | null;
   batch_date: string | null; // YYYY-MM-DD
@@ -81,6 +82,7 @@ export interface CreateStopRequest {
   paid_by?: string;
   sort_order?: number;
   notes?: string;
+  meta?: Record<string, unknown> | null;
   caption?: string;
   captured_at?: string;
 }

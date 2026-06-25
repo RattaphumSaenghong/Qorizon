@@ -47,6 +47,7 @@ export function toStopRow(s: Stop & { assignees?: AssigneeRelation[] }): StopRow
     paid_by: s.paid_by,
     sort_order: s.sort_order,
     notes: s.notes,
+    meta: (s.meta as Record<string, unknown> | null) ?? null,
     caption: s.caption,
     captured_at: iso(s.captured_at),
     batch_date: dateOnly(s.batch_date),

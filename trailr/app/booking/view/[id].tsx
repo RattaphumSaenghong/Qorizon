@@ -25,7 +25,7 @@ import { Chip } from '../../../src/components/Chip';
 import { MapView } from '../../../src/components/MapView';
 import { useToast } from '../../../src/components/Toast';
 import { Wordmark } from '../../../src/components/Wordmark';
-import { moneyThb, nightlyThb } from '../../../src/lib/bookingDisplay';
+import { flightRowLine, flightSegmentLine, flightSegmentsFromMeta, moneyThb, nightlyThb } from '../../../src/lib/bookingDisplay';
 
 type DetailRow = { label: string; value: string };
 
@@ -98,12 +98,15 @@ function buildRows(booking: BookingDetailRow): DetailRow[] {
     if (nights) rows.push({ label: 'Nights', value: nights });
     if (hotelId) rows.push({ label: 'Hotel id', value: hotelId });
   } else {
-    const route = metaString(meta, 'route');
-    const airline = metaString(meta, 'airline');
-    const departDate = metaString(meta, 'depart_date');
-    if (route) rows.push({ label: 'Route', value: route });
-    if (airline) rows.push({ label: 'Airline', value: airline });
-    if (departDate) rows.push({ label: 'Departure', value: departDate });
+    const summary = flightRowLine(meta);
+    const segments = flightSegmentsFromMeta(meta);
+    if (summary) rows.push({ label: 'Flight', value: summary });
+    segments.forEach((segment, index) => {
+      rows.push({
+        label: segments.length > 1 ? `Leg ${index + 1}` : 'Leg',
+        value: flightSegmentLine(segment),
+      });
+    });
   }
 
   return rows;

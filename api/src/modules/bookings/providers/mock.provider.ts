@@ -16,20 +16,46 @@ export class MockFlightProvider implements FlightProviderApi {
   async searchFlights(p: FlightSearch): Promise<BookingOffer[]> {
     const o = p.origin ?? 'BKK';
     const d = p.destination ?? 'NRT';
+    const departDate = p.depart_date ?? new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10);
     const airlines = [
-      { code: 'TG', name: 'Thai Airways', stops: 0, dur: '6h 05m', price: 12400 },
-      { code: 'JL', name: 'Japan Airlines', stops: 0, dur: '6h 20m', price: 11900 },
-      { code: 'D7', name: 'AirAsia X', stops: 1, dur: '9h 40m', price: 7800 },
+      { code: 'TG', name: 'Thai Airways', stops: 0, durationMins: 365, price: 12400, hour: 8 },
+      { code: 'JL', name: 'Japan Airlines', stops: 0, durationMins: 380, price: 11900, hour: 10 },
+      { code: 'D7', name: 'AirAsia X', stops: 1, durationMins: 580, price: 7800, hour: 13 },
     ];
-    return airlines.map((a, i) => ({
-      id: `mock-fl-${o}-${d}-${a.code}`,
-      type: 'flight' as const,
-      provider: 'mock' as const,
-      title: `${o} -> ${d}`,
-      subtitle: `${a.name} · ${a.stops === 0 ? 'non-stop' : `${a.stops} stop`} · ${a.dur}`,
-      amount_thb: a.price,
-      meta: { airline: a.code, depart_date: p.depart_date, index: i },
-    }));
+    return airlines.map((a, i) => {
+      const depAt = `${departDate}T${String(a.hour).padStart(2, '0')}:15:00`;
+      const arrAt = addMinutes(depAt, a.durationMins);
+      const flightNumber = String(500 + i);
+      const segment = {
+        origin: o,
+        destination: d,
+        departing_at: depAt,
+        arriving_at: arrAt,
+        carrier: a.code,
+        carrier_name: a.name,
+        flight_number: flightNumber,
+      };
+      return {
+        id: `mock-fl-${o}-${d}-${a.code}`,
+        type: 'flight' as const,
+        provider: 'mock' as const,
+        title: `${o} -> ${d}`,
+        subtitle: `${a.name} - ${a.stops === 0 ? 'non-stop' : `${a.stops} stop`} - ${formatDuration(a.durationMins)}`,
+        amount_thb: a.price,
+        meta: {
+          origin: o,
+          destination: d,
+          dep_at: depAt,
+          arr_at: arrAt,
+          carrier: a.code,
+          carrier_name: a.name,
+          flight_number: flightNumber,
+          stops: a.stops,
+          segments: [segment],
+          index: i,
+        },
+      };
+    });
   }
 
   async bookFlight(offerId: string, passengerDetails?: PassengerDetails): Promise<BookingConfirmation> {
@@ -39,6 +65,25 @@ export class MockFlightProvider implements FlightProviderApi {
       raw: { passengerDetails },
     };
   }
+}
+
+function addMinutes(isoLocal: string, minutes: number): string {
+  const match = isoLocal.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return isoLocal;
+  const [, year, month, day, hour, minute, second] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second ?? 0));
+  date.setMinutes(date.getMinutes() + minutes);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-') + `T${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:00`;
+}
+
+function formatDuration(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
 export class MockHotelProvider implements HotelProviderApi {
@@ -57,7 +102,7 @@ export class MockHotelProvider implements HotelProviderApi {
       type: 'hotel' as const,
       provider: 'mock' as const,
       title: h.name,
-      subtitle: `${h.star} rating · ${nights} nights · ${city}`,
+      subtitle: `${h.star} rating - ${nights} nights - ${city}`,
       amount_thb: h.nightly * nights,
       latitude: h.lat,
       longitude: h.lon,

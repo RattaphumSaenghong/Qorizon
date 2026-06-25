@@ -4,6 +4,7 @@ import {
   IsIn,
   IsInt,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -75,6 +76,11 @@ export class UpdateStopDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @ValidateIf((o) => o.meta !== null)
+  @IsObject()
+  meta?: Record<string, unknown> | null;
 
   @IsOptional()
   @IsString()

@@ -26,7 +26,7 @@ import { CoverImage } from '../../src/components/CoverImage';
 import { MapView } from '../../src/components/MapView';
 import { MapSheet } from '../../src/components/MapSheet';
 import { PressableScale } from '../../src/components/PressableScale';
-import { useBookings, useCreateBooking, useHotelRecommendations, useInventory, useLikedStops, useSaved, useTrip, useTripStops, useUpdateTrip, useAddTripDay, useUpdateTripDay, useDeleteTripDay, fetchTripDays, createStop, updateStop, deleteStop, useTripMembers } from '@trailr/db';
+import { useBookings, useCreateBooking, useHotelRecommendations, useInventory, useLikedStops, useSaved, useTrip, useTripStops, useUpdateTrip, useAddTripDay, useUpdateTripDay, useDeleteTripDay, fetchTripDays, fetchBooking, createStop, updateStop, deleteStop, useTripMembers } from '@trailr/db';
 import {
   DndContext,
   DragOverlay,
@@ -50,6 +50,7 @@ import { PaidByControl } from '../../src/components/PaidByControl';
 import { MemberSwitcher } from '../../src/components/MemberSwitcher';
 import { BookingSearchModal } from '../../src/components/BookingSearchModal';
 import { computeSettlement } from '../../src/lib/budget';
+import { flightSummaryFromMeta } from '../../src/lib/bookingDisplay';
 import { suggestPlaces, retrievePlace, newSessionToken } from '../../src/lib/places';
 import { styles } from '../../src/builder/styles';
 import { StopCard, DroppableDaySection, DraggableStopRow, LogisticsBlock } from '../../src/builder/components';
@@ -69,6 +70,12 @@ import {
   type Coord,
   type Suggestion,
 } from '../../src/builder/helpers';
+
+function flightTimeFromIso(value?: string | null): string | null {
+  if (!value) return null;
+  const match = value.match(/(?:T|\s)(\d{2}:\d{2})/) ?? value.match(/^(\d{2}:\d{2})/);
+  return match?.[1] ?? null;
+}
 
 export default function BuilderScreen() {
   const router = useRouter();
@@ -419,6 +426,8 @@ export default function BuilderScreen() {
     if (addingBackpackId) return;
     setAddingBackpackId(`booking:${booking.id}`);
     try {
+      const detail = booking.type === 'flight' ? await fetchBooking(booking.id) : null;
+      const flightSummary = detail ? flightSummaryFromMeta(detail.meta) : null;
       await createStop({
         trip_id: tripId,
         day_id: null,
@@ -429,12 +438,13 @@ export default function BuilderScreen() {
         latitude: null,
         longitude: null,
         place_id: null,
-        planned_start: null,
-        planned_end: null,
+        planned_start: flightTimeFromIso(flightSummary?.dep_at),
+        planned_end: flightTimeFromIso(flightSummary?.arr_at),
         duration_mins: null,
         cost: booking.amount_thb == null ? null : Math.round(booking.amount_thb),
         sort_order: unassigned.length,
         notes: 'from booking',
+        meta: flightSummary as unknown as Record<string, unknown> | null,
         caption: null,
         captured_at: null,
         batch_date: null,
@@ -442,8 +452,9 @@ export default function BuilderScreen() {
       });
       refreshStops();
       toast('Booking added to Unsorted');
-    } catch {
-      toast('Could not add booking');
+    } catch (error) {
+      const message = String(error);
+      toast(message.includes('outside this trip') ? 'That flight is outside this trip date range' : 'Could not add booking');
     } finally {
       setAddingBackpackId(null);
     }
@@ -1170,6 +1181,7 @@ export default function BuilderScreen() {
           ) : (
             bookedItems.map((booking) => {
               const isFlight = booking.type === 'flight';
+              const flightCopy = isFlight ? 'Schedule locks when added' : null;
               return (
                 <View key={booking.id} style={styles.backpackCard}>
                   <View style={[styles.backpackBookingIcon, isFlight && styles.backpackFlightIcon]}>
@@ -1181,8 +1193,8 @@ export default function BuilderScreen() {
                       {booking.status}
                       {booking.amount_thb != null ? ` - ${booking.amount_thb.toLocaleString()} THB` : ''}
                     </Text>
-                    {isFlight ? (
-                      <Text style={styles.backpackCopy} numberOfLines={1}>Flight details after Duffel integration</Text>
+                    {flightCopy ? (
+                      <Text style={styles.backpackCopy} numberOfLines={1}>{flightCopy}</Text>
                     ) : null}
                   </View>
                   <Btn

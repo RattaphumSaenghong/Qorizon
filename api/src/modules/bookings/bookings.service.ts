@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Booking, Prisma } from '@prisma/client';
 import type {
   BookingDetailRow,
@@ -21,6 +21,7 @@ import { SearchBookingDto } from './dto/search-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { HotelCatalogQueryDto } from './dto/hotel-catalog-query.dto';
 import { HotelRatesDto } from './dto/hotel-rates.dto';
+import { extractFlightSummary, flightDepartsOutsideTripWindow, timeFromIso } from './flight-itinerary';
 
 // Internal estimate of provider/affiliate payout. This is not user-facing markup.
 const ESTIMATED_PROVIDER_COMMISSION_RATE = 0.08;
@@ -67,6 +68,16 @@ export class BookingsService {
    *  creates an assigned logistics block in the itinerary and links it. */
   async create(userId: string, dto: CreateBookingDto): Promise<BookingRow> {
     if (dto.trip_id) await this.policy.assertCanReadTrip(userId, dto.trip_id);
+    const flightSummary = dto.type === 'flight' ? extractFlightSummary(dto.meta ?? null) : null;
+    if (dto.trip_id && dto.type === 'flight') {
+      const trip = await this.prisma.trip.findUnique({
+        where: { id: dto.trip_id },
+        select: { start_date: true, end_date: true },
+      });
+      if (trip && flightDepartsOutsideTripWindow(trip, flightSummary?.dep_at)) {
+        throw new BadRequestException('flight departure is outside this trip date range');
+      }
+    }
 
     const commission = Math.round(dto.amount_thb * ESTIMATED_PROVIDER_COMMISSION_RATE);
     const assigneeIds = dto.assignee_ids ?? [];
@@ -94,6 +105,9 @@ export class BookingsService {
             status: 'planned',
             scope,
             cost: dto.amount_thb ? Math.round(dto.amount_thb) : undefined,
+            planned_start: dto.type === 'flight' ? timeFromIso(flightSummary?.dep_at) ?? undefined : undefined,
+            planned_end: dto.type === 'flight' ? timeFromIso(flightSummary?.arr_at) ?? undefined : undefined,
+            meta: flightSummary ? (flightSummary as unknown as Prisma.InputJsonValue) : undefined,
             ...(scope === 'assigned' && assigneeIds.length > 0
               ? { assignees: { create: assigneeIds.map((uid) => ({ user_id: uid })) } }
               : {}),

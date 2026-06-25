@@ -2,13 +2,14 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { InventoryItem, Prisma } from '@prisma/client';
-import type { BookingType, InventoryItemRow, InventoryStatus } from '@trailr/shared';
+import type { BookingType, FlightSegment, FlightSummary, InventoryItemRow, InventoryStatus } from '@trailr/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PolicyService } from '../../authz/policy.service';
 import { FxService } from '../fx/fx.service';
 import { IngestEmailDto } from './dto/ingest-email.dto';
 import { parseJsonLd, type ParsedInventory } from './parsers/jsonld.parser';
 import { parseWithAnthropic } from './parsers/llm.parser';
+import { flightDepartsOutsideTripWindow, timeFromIso } from '../bookings/flight-itinerary';
 
 @Injectable()
 export class IngestionService {
@@ -65,6 +66,18 @@ export class IngestionService {
     await this.policy.assertCanEditTrip(userId, tripId);
     const parsed = item.parsed as unknown as ParsedInventory;
     const amount = Number(parsed.amount_thb ?? 0);
+    const flightSummary = parsed.type === 'flight' ? flightSummaryFromParsed(parsed) : null;
+    const flightMeta = flightSummary ? { ...flightSummary, segments: flightSegmentsFromSummary(flightSummary) } : null;
+
+    if (parsed.type === 'flight') {
+      const trip = await this.prisma.trip.findUnique({
+        where: { id: tripId },
+        select: { start_date: true, end_date: true },
+      });
+      if (trip && flightDepartsOutsideTripWindow(trip, flightSummary?.dep_at)) {
+        throw new BadRequestException('flight departure is outside this trip date range');
+      }
+    }
 
     const matched = await this.prisma.$transaction(async (tx) => {
       const stop = await tx.stop.create({
@@ -75,10 +88,11 @@ export class IngestionService {
           scope: 'assigned',
           category: item.type,
           location_name: parsed.title ?? parsed.hotel_name ?? null,
-          planned_start: parsed.dep_time ?? parsed.check_in ?? null,
-          planned_end: parsed.arr_time ?? parsed.check_out ?? null,
+          planned_start: parsed.type === 'flight' ? timeFromIso(flightSummary?.dep_at) ?? parsed.dep_time ?? null : parsed.check_in ?? null,
+          planned_end: parsed.type === 'flight' ? timeFromIso(flightSummary?.arr_at) ?? parsed.arr_time ?? null : parsed.check_out ?? null,
           cost: Number.isFinite(amount) && amount > 0 ? Math.round(amount) : undefined,
           notes: this.notesFromParsed(parsed),
+          meta: flightSummary ? (flightSummary as unknown as Prisma.InputJsonValue) : undefined,
           assignees: { create: [{ user_id: userId }] },
         },
       });
@@ -93,7 +107,7 @@ export class IngestionService {
           status: 'confirmed',
           amount_thb: Number.isFinite(amount) && amount > 0 ? amount : undefined,
           commission_thb: 0,
-          raw_payload: { title: parsed.title, parsed } as unknown as Prisma.InputJsonValue,
+          raw_payload: { title: parsed.title, meta: flightMeta, parsed } as unknown as Prisma.InputJsonValue,
         },
       });
       return tx.inventoryItem.update({
@@ -176,6 +190,38 @@ export class IngestionService {
       .filter(Boolean)
       .join(' · ') || null;
   }
+}
+
+function flightSummaryFromParsed(parsed: ParsedInventory): FlightSummary | null {
+  const origin = parsed.origin ?? '';
+  const destination = parsed.destination ?? '';
+  const depAt = parsed.dep_time ?? null;
+  const arrAt = parsed.arr_time ?? null;
+  if (!origin && !destination && !depAt && !arrAt) return null;
+  return {
+    origin,
+    destination,
+    dep_at: depAt,
+    arr_at: arrAt,
+    carrier: null,
+    carrier_name: null,
+    flight_number: null,
+    stops: 0,
+  };
+}
+
+function flightSegmentsFromSummary(summary: FlightSummary): FlightSegment[] {
+  return [
+    {
+      origin: summary.origin || null,
+      destination: summary.destination || null,
+      departing_at: summary.dep_at,
+      arriving_at: summary.arr_at,
+      carrier: summary.carrier,
+      carrier_name: summary.carrier_name,
+      flight_number: summary.flight_number,
+    },
+  ];
 }
 
 function toInventoryRow(i: InventoryItem): InventoryItemRow {

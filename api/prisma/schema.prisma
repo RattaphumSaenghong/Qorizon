@@ -197,6 +197,7 @@ model Stop {
   paid_by       String?  @db.Uuid // who fronted this cost (settle-up); null → the stop's creator
   sort_order    Int      @default(0)
   notes         String?
+  meta          Json?
   caption       String?
   captured_at   DateTime? @db.Timestamptz(6)
   batch_date    DateTime? @db.Date

@@ -112,7 +112,21 @@
       "Bash(curl -s -X POST http://localhost:3000/api/v1/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"somchai@trailr.app\",\"password\":\"password123\"}')",
       "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);[print\\(t.get\\('id'\\), '-', t.get\\('title'\\)\\) for t in \\(d if isinstance\\(d,list\\) else []\\)][:8]\")",
       "Bash(xargs grep -ln \"useInventory\")",
-      "Bash(xargs grep -ln \"export function useHotelRecommendations\")"
+      "Bash(xargs grep -ln \"export function useHotelRecommendations\")",
+      "Bash(grep -nA 25 \"moveStopById\")",
+      "Bash(curl -s -o /dev/null -w \"API: %{http_code}\\\\n\" -X POST http://localhost:3000/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"x\",\"password\":\"y\"}')",
+      "Bash(cd /c/Users/zacrt/Projects_1/claude-workspace/Qorizon/trailr && find . -path ./node_modules -prune -o -iname '*builder*' -print 2>/dev/null)",
+      "WebFetch(domain:duffel.com)",
+      "Bash(cd api *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/)",
+      "Bash(curl -s -X POST http://localhost:3000/bookings/search -H \"Content-Type: application/json\" -d '{\"type\":\"flight\",\"origin\":\"BKK\",\"destination\":\"KIX\",\"depart_date\":\"2026-07-10\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/v1/bookings/search -H \"Content-Type: application/json\" -d '{\"type\":\"flight\",\"origin\":\"BKK\",\"destination\":\"KIX\",\"depart_date\":\"2026-07-10\"}')",
+      "Bash(python -m json.tool)",
+      "Bash(sed -E 's/=\\(.{0,8}\\).*/=\\\\1…\\(len varies\\)/')",
+      "Read(//c/Users/zacrt/Projects_1/claude-workspace/Qorizon/%y api/**)",
+      "Bash(powershell.exe -NoProfile -Command 'Get-CimInstance Win32_Process -Filter \"Name='\\\\''node.exe'\\\\''\" | Select-Object ProcessId, CreationDate, @{N='\\\\''Cmd'\\\\'';E={$_.CommandLine.Substring\\(0,[Math]::Min\\(60,$_.CommandLine.Length\\)\\)}} | Format-Table -Auto | Out-String')",
+      "Bash(powershell.exe -NoProfile -Command 'Get-CimInstance Win32_Process -Filter \"Name='\\\\''node.exe'\\\\''\" | Where-Object { $_.CommandLine -like '\\\\''*dist/src/main.js*'\\\\'' } | Select-Object ProcessId, CreationDate | Format-Table -Auto | Out-String')",
+      "Bash(powershell.exe -NoProfile -Command \"Stop-Process -Id 39124 -Force\")"
     ]
   }
 }

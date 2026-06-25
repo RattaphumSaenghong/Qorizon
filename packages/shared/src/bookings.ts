@@ -9,6 +9,27 @@ export type BookingStatus = (typeof BOOKING_STATUS)[number];
 export const INVENTORY_STATUS = ['unmatched', 'matched', 'dismissed'] as const;
 export type InventoryStatus = (typeof INVENTORY_STATUS)[number];
 
+export interface FlightSummary {
+  origin: string;
+  destination: string;
+  dep_at: string | null;
+  arr_at: string | null;
+  carrier: string | null;
+  carrier_name: string | null;
+  flight_number: string | null;
+  stops: number;
+}
+
+export interface FlightSegment {
+  origin: string | null;
+  destination: string | null;
+  departing_at: string | null;
+  arriving_at: string | null;
+  carrier: string | null;
+  carrier_name: string | null;
+  flight_number: string | null;
+}
+
 /** A bookable offer returned from a provider search (not persisted until booked). */
 export interface BookingOffer {
   id: string; // provider offer id → stored as external_ref
