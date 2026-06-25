@@ -1,0 +1,8 @@
+env: load .env.local
+env: export EXPO_PUBLIC_API_URL EXPO_PUBLIC_MAPBOX_TOKEN EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_SUPABASE_URL LITEAPI_KEY
+Starting project at C:\Users\zacrt\Projects_1\claude-workspace\Qorizon\trailr
+› Port 8081 is being used by another process
+Input is required, but 'npx expo' is in non-interactive mode.
+Required input:
+> Use port 8082 instead?
+› Skipping dev server

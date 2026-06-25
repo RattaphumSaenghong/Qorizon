@@ -2,7 +2,7 @@
  * Trip Builder — day timeline + route map.
  * Build a plan: tap the map to drop stops, edit/reorder them, then publish.
  */
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -110,7 +110,7 @@ function isLogistics(stop: StopWithMedia): boolean {
   return stop.category === 'flight' || stop.category === 'hotel';
 }
 
-function StopCard({
+const StopCard = React.memo(function StopCard({
   stop,
   currency,
   index,
@@ -197,7 +197,7 @@ function StopCard({
       </View>
     </View>
   );
-}
+});
 
 function DroppableDaySection({
   id, onLayout, children,
@@ -218,12 +218,12 @@ function DroppableDaySection({
   );
 }
 
-function DraggableStopRow({
-  stop, currency, index, selected, onSelect, onEdit, onRemove, onUp, onDown, canUp, canDown,
+const DraggableStopRow = React.memo(function DraggableStopRow({
+  stop, currency, index, selected, onSelect, onEdit, onRemove, onMove, canUp, canDown,
 }: {
   stop: StopWithMedia; currency: string; index?: number; selected?: boolean;
-  onSelect: () => void; onEdit: () => void; onRemove: () => void;
-  onUp: () => void; onDown: () => void; canUp: boolean; canDown: boolean;
+  onSelect: (id: string) => void; onEdit: (stop: StopWithMedia) => void; onRemove: (id: string) => void;
+  onMove: (id: string, dir: -1 | 1) => void; canUp: boolean; canDown: boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: stop.id });
   return (
@@ -235,13 +235,25 @@ function DraggableStopRow({
         <View style={[styles.railDot, selected && styles.railDotActive]} />
       </View>
       <View style={{ flex: 1 }}>
-        <StopCard stop={stop} currency={currency} index={index} selected={selected} onSelect={onSelect} onEdit={onEdit} onRemove={onRemove} onUp={onUp} onDown={onDown} canUp={canUp} canDown={canDown} />
+        <StopCard
+          stop={stop}
+          currency={currency}
+          index={index}
+          selected={selected}
+          onSelect={() => onSelect(stop.id)}
+          onEdit={() => onEdit(stop)}
+          onRemove={() => onRemove(stop.id)}
+          onUp={() => onMove(stop.id, -1)}
+          onDown={() => onMove(stop.id, 1)}
+          canUp={canUp}
+          canDown={canDown}
+        />
       </View>
     </View>
   );
-}
+});
 
-function LogisticsBlock({
+const LogisticsBlock = React.memo(function LogisticsBlock({
   title,
   type,
   stops,
@@ -357,7 +369,7 @@ function LogisticsBlock({
       )}
     </View>
   );
-}
+});
 
 export default function BuilderScreen() {
   const router = useRouter();
@@ -437,6 +449,8 @@ export default function BuilderScreen() {
   // (stops is a fresh array each render → would otherwise loop the effect).
   const stopsRef = useRef(stops);
   stopsRef.current = stops;
+  // Latest filtered lists, read by the stable reorder handler (moveStopById).
+  const filteredRef = useRef<{ days: BuilderDay[]; unassigned: StopWithMedia[] }>({ days: [], unassigned: [] });
   const [submitting, setSubmitting] = useState(false);
   const [formAssigneeIds, setFormAssigneeIds] = useState<string[]>([]);
   const [formPaidBy, setFormPaidBy] = useState<string | null>(null);
@@ -474,7 +488,10 @@ export default function BuilderScreen() {
     return () => clearTimeout(t);
   }, [formLoc, formOpen]);
 
-  const refreshStops = () => queryClient.invalidateQueries({ queryKey: ['stops', 'trip', tripId] });
+  const refreshStops = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: ['stops', 'trip', tripId] }),
+    [queryClient, tripId],
+  );
 
   // Group the trip's real stops under their days.
   const days: BuilderDay[] = useMemo(
@@ -522,6 +539,7 @@ export default function BuilderScreen() {
           ),
     [unassigned, filterMemberId],
   );
+  filteredRef.current = { days: filteredDays, unassigned: filteredUnassigned };
   const filteredFlightStops = useMemo(
     () =>
       filterMemberId == null
@@ -623,15 +641,15 @@ export default function BuilderScreen() {
     setFormOpen(true);
   };
 
-  const openBooking = (type: LogisticsType) => {
+  const openBooking = useCallback((type: LogisticsType) => {
     setBookingType(type);
     setBookingOpen(true);
-  };
+  }, []);
 
-  const openSideTab = (tab: BuilderSideTab) => {
+  const openSideTab = useCallback((tab: BuilderSideTab) => {
     setSideTabs((prev) => (prev.includes(tab) ? prev : [...prev, tab]));
     setActiveSideTab(tab);
-  };
+  }, []);
 
   const closeSideTab = (tab: BuilderSideTab) => {
     setSideTabs((prev) => {
@@ -645,19 +663,24 @@ export default function BuilderScreen() {
     }
   };
 
-  const openStaySearch = () => {
+  const openStaySearch = useCallback(() => {
     openSideTab('stays');
     setStaySearchActive(true);
-  };
+  }, [openSideTab]);
+
+  const openStaysExplore = useCallback(
+    () => router.push(`/book/stays?tripId=${tripId}`),
+    [router, tripId],
+  );
 
   const openManualLogistics = (type: LogisticsType) => {
     setBookingOpen(false);
     openAdd(undefined, undefined, type === 'hotel' ? trip?.destination ?? '' : '', type);
   };
 
-  const openInventory = (type: LogisticsType) => {
+  const openInventory = useCallback((type: LogisticsType) => {
     router.push(`/inventory?type=${type}`);
-  };
+  }, [router]);
 
   const addBackpackStop = async (stop: StopWithMedia) => {
     if (addingBackpackId) return;
@@ -756,7 +779,7 @@ export default function BuilderScreen() {
     );
   };
 
-  const openEdit = (s: StopWithMedia) => {
+  const openEdit = useCallback((s: StopWithMedia) => {
     searchSession.current = newSessionToken();
     setEditing(s);
     setFormDayId(s.day_id ?? undefined);
@@ -772,7 +795,7 @@ export default function BuilderScreen() {
     setFormPaidBy(s.paid_by ?? null);
     setSuggestions([]);
     setFormOpen(true);
-  };
+  }, []);
 
   // Tapping the map drops a new stop there (the modal covers the map, so this
   // only fires when the form is closed).
@@ -840,7 +863,7 @@ export default function BuilderScreen() {
     }
   };
 
-  const removeStop = async (stopId: string) => {
+  const removeStop = useCallback(async (stopId: string) => {
     try {
       await deleteStop(stopId);
       refreshStops();
@@ -848,9 +871,9 @@ export default function BuilderScreen() {
     } catch (e) {
       toast('Could not remove stop');
     }
-  };
+  }, [refreshStops, toast]);
 
-  const moveStop = async (arr: StopWithMedia[], si: number, dir: -1 | 1) => {
+  const moveStop = useCallback(async (arr: StopWithMedia[], si: number, dir: -1 | 1) => {
     const j = si + dir;
     if (j < 0 || j >= arr.length) return;
     const a = arr[si];
@@ -864,7 +887,21 @@ export default function BuilderScreen() {
     } catch {
       toast('Could not reorder');
     }
-  };
+  }, [refreshStops, toast]);
+
+  // Reorder by stop id (stable handler for the memoized rows). Reads the current
+  // filtered day/unassigned lists from a ref so reorder respects the member filter,
+  // matching the per-row up/down behaviour without recreating handlers each render.
+  const moveStopById = useCallback((stopId: string, dir: -1 | 1) => {
+    const stop = stopsRef.current.find((s) => s.id === stopId);
+    if (!stop) return;
+    const arr = stop.day_id
+      ? (filteredRef.current.days.find((d) => d.id === stop.day_id)?.stops ?? [])
+      : filteredRef.current.unassigned;
+    const si = arr.findIndex((s) => s.id === stopId);
+    if (si < 0) return;
+    void moveStop(arr, si, dir);
+  }, [moveStop]);
 
   const handleDragEnd = async (event: DragEndEvent) => {
     setDragActiveId(null);
@@ -1114,13 +1151,13 @@ export default function BuilderScreen() {
             stops={filteredStayStops}
             currency={currency}
             selectedStopId={selectedStopId}
-            onAdd={() => openStaySearch()}
+            onAdd={openStaySearch}
             onInbox={openInventory}
             onSelect={setSelectedStopId}
             onEdit={openEdit}
             onRemove={removeStop}
             inboxCount={stayInventory.length}
-            onExplore={() => router.push(`/book/stays?tripId=${tripId}`)}
+            onExplore={openStaysExplore}
           />
         </View>
         {days.length === 0 && unassigned.length === 0 ? (
@@ -1181,11 +1218,10 @@ export default function BuilderScreen() {
                     currency={currency}
                     index={orderIndex.get(s.id)}
                     selected={s.id === selectedStopId}
-                    onSelect={() => setSelectedStopId(s.id)}
-                    onEdit={() => openEdit(s)}
-                    onRemove={() => removeStop(s.id)}
-                    onUp={() => moveStop(day.stops, si, -1)}
-                    onDown={() => moveStop(day.stops, si, 1)}
+                    onSelect={setSelectedStopId}
+                    onEdit={openEdit}
+                    onRemove={removeStop}
+                    onMove={moveStopById}
                     canUp={si > 0}
                     canDown={si < day.stops.length - 1}
                   />
@@ -1212,11 +1248,10 @@ export default function BuilderScreen() {
                   currency={currency}
                   index={orderIndex.get(s.id)}
                   selected={s.id === selectedStopId}
-                  onSelect={() => setSelectedStopId(s.id)}
-                  onEdit={() => openEdit(s)}
-                  onRemove={() => removeStop(s.id)}
-                  onUp={() => moveStop(filteredUnassigned, si, -1)}
-                  onDown={() => moveStop(filteredUnassigned, si, 1)}
+                  onSelect={setSelectedStopId}
+                  onEdit={openEdit}
+                  onRemove={removeStop}
+                  onMove={moveStopById}
                   canUp={si > 0}
                   canDown={si < filteredUnassigned.length - 1}
                 />

@@ -101,7 +101,18 @@
       "Bash(node smoke-recs2.mjs)",
       "Bash(git check-ignore *)",
       "Bash(grep -iE \"\\\\.env$|/dist/\")",
-      "Bash(node -e \"const p=require\\('./trailr/package.json'\\);console.log\\('scripts:',JSON.stringify\\(p.scripts\\)\\);console.log\\('expo:',p.dependencies&&p.dependencies.expo\\)\")"
+      "Bash(node -e \"const p=require\\('./trailr/package.json'\\);console.log\\('scripts:',JSON.stringify\\(p.scripts\\)\\);console.log\\('expo:',p.dependencies&&p.dependencies.expo\\)\")",
+      "Bash(git commit -q -m ' *)",
+      "Bash(node --enable-source-maps dist/src/main.js)",
+      "Bash(curl -s -X POST http://localhost:3000/api/auth/login -H \"Content-Type: application/json\" -d \"{\\\\\"email\\\\\":\\\\\"somchai@trailr.app\\\\\",\\\\\"password\\\\\":\\\\\"password123\\\\\"}\")",
+      "Bash(curl -s -X POST http://localhost:3000/api/v1/auth/login -H \"Content-Type: application/json\" -d \"{\\\\\"email\\\\\":\\\\\"somchai@trailr.app\\\\\",\\\\\"password\\\\\":\\\\\"password123\\\\\"}\")",
+      "Bash(curl -s \"http://localhost:3000/api/v1/hotels/catalog?lat=13.7563&lng=100.5018&radius=500&limit=60\" -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI4MjY4MTA5Yy1kOTI5LTQ5MGItYjNkZS1kNDhkNDU1NzExNzQiLCJpYXQiOjE3ODIzNjQ5NzEsImV4cCI6MTc4MjM2NTg3MX0.PwMt6l3JnHHgo3g-F93fWTxZSV7MaFy7Lugx79OOoCw\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Hotels: {len\\(d\\) if isinstance\\(d,list\\) else d}'\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/api/v1/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"email\":\"x\",\"password\":\"y\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/v1/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"somchai@trailr.app\",\"password\":\"password123\"}')",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);[print\\(t.get\\('id'\\), '-', t.get\\('title'\\)\\) for t in \\(d if isinstance\\(d,list\\) else []\\)][:8]\")",
+      "Bash(xargs grep -ln \"useInventory\")",
+      "Bash(xargs grep -ln \"export function useHotelRecommendations\")"
     ]
   }
 }
