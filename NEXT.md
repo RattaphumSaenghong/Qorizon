@@ -20,13 +20,15 @@ always failed with `limit:80`. Now always fetches rates for `hotels.slice(0, PRI
 
 ---
 
-## 2. Per-booking detail screen  ·  ~½ day
+## 2. Per-booking detail screen  ·  ~½ day  ·  📋 SPEC'D → `DESIGN_booking_detail.md`
 **Why:** Saved→Booked cards are **display-only** — there's no screen to view a single booking
 (`booking/[id]` is a *trip-scoped booking flow*, not a detail view).
 
-**Brief:** new route `app/booking/view/[id].tsx` reading one `BookingRow` (add `GET /bookings/:id`
-in `bookings.controller`/`service` if missing; `useBooking(id)` hook). Then re-enable the
-`BookingCard` tap in `app/(tabs)/saved.tsx` to push there.
+**Brief:** full spec in `DESIGN_booking_detail.md`. TL;DR — add `BookingDetailRow` +
+`GET /bookings/:id` (list's `BookingRow` drops `meta`); `useBooking(id)` hook (+ fix confirm/cancel
+to invalidate the detail key); new route `app/booking/view/[id].tsx` (nested to avoid the existing
+trip-scoped `booking/[id]`); re-enable the `BookingCard` tap in `app/(tabs)/saved.tsx`. 4 phases,
+each verifiable; backend curl script in §10.
 
 ---
 
@@ -62,5 +64,6 @@ keyed on rounded (lat,lng,radius) to cut LiteAPI calls (mirror `MapboxService`'s
 - Book landing uses text "Flight"/"Stay" as icons — swap for real icons.
 
 ## Reference docs
-`PROGRESS.md` · `DESIGN_explore_stays.md` · `DESIGN_book_tab.md` · `DESIGN_hotel_recs.md` ·
+`PROGRESS.md` · `DESIGN_booking_detail.md` (item 2 spec) · `DESIGN_explore_stays.md` ·
+`DESIGN_book_tab.md` · `DESIGN_hotel_recs.md` ·
 `trailr-pricing-ssp-anchor.md` (Downloads) · memory: `trailr-bookings`, `trailr-hotel-recs`, `trailr-fx-rates`.
