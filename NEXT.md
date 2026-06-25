@@ -1,14 +1,16 @@
 # Trailr — What To Do Next
 
 > Start-of-session brief. Read `PROGRESS.md` first for current state, then pick ONE item below.
-> Booking is **live** (LiteAPI sandbox key in `api/.env`); hotel recs, pricing floor, FX, the
-> Book tab, and Saved→Booked all shipped & committed (`6c7e091`, `e8a4fd1`, `ec16038`, `03a2509`).
+> Booking is **live** — both **LiteAPI** (hotels) and **Duffel** (flights) sandbox keys are in
+> `api/.env`, smoke-tested end-to-end. Hotel recs, pricing floor, FX, Book tab, Saved→Booked,
+> per-booking detail, and the flight-booking lifecycle backend all shipped.
 
 ---
 
 ## Recommended order
-**1 (verify) → 2 or 3 (quick wins) → 4 (the real one) → 5 (polish).**
-Do **1 first** — the map UI has never run in a browser, so verify before building more on it.
+**6 (flight display, quick) → 4 (payments/MoR, the real one) → 5 (map polish).**
+Items 1–3 are done (see below). **6** finishes the flight-booking lifecycle (frontend only —
+backend shipped); **4** is the big one.
 
 ---
 
@@ -20,24 +22,18 @@ always failed with `limit:80`. Now always fetches rates for `hotels.slice(0, PRI
 
 ---
 
-## 2. Per-booking detail screen  ·  ~½ day  ·  📋 SPEC'D → `DESIGN_booking_detail.md`
-**Why:** Saved→Booked cards are **display-only** — there's no screen to view a single booking
-(`booking/[id]` is a *trip-scoped booking flow*, not a detail view).
-
-**Brief:** full spec in `DESIGN_booking_detail.md`. TL;DR — add `BookingDetailRow` +
-`GET /bookings/:id` (list's `BookingRow` drops `meta`); `useBooking(id)` hook (+ fix confirm/cancel
-to invalidate the detail key); new route `app/booking/view/[id].tsx` (nested to avoid the existing
-trip-scoped `booking/[id]`); re-enable the `BookingCard` tap in `app/(tabs)/saved.tsx`. 4 phases,
-each verifiable; backend curl script in §10.
+## ~~2. Per-booking detail screen~~ ✅ DONE
+Spec `DESIGN_booking_detail.md` implemented: `app/booking/view/[id].tsx`, `useBooking(id)`,
+`GET /bookings/:id`, Saved→Booked card tap re-enabled. **Note:** its flight branch reads stale
+`meta.route/airline/depart_date` — fixed by item **6** (the Duffel meta shape changed under it).
 
 ---
 
-## 3. Real Duffel flights  ·  ~¼ day (+ key)
-**Why:** flights currently fall back to **mock** (`DUFFEL_API_KEY` unset). Hotels are already live.
-
-**Brief:** add `DUFFEL_API_KEY` (test key, `duffel_test_…`) to `api/.env`; restart; smoke-test a
-live BKK→KIX search via `POST /bookings/search`; verify FX + `amount_thb` mapping in
-`duffel.provider.ts` against a real response shape (mirror how LiteAPI was verified).
+## ~~3. Real Duffel flights~~ ✅ DONE (`66069aa`, `354ba17`)
+`DUFFEL_API_KEY` in `api/.env`, restarted, smoke-tested live BKK→KIX (`provider:"duffel"`, real
+`off_…` ids, FX ~33.4 → `amount_thb`). Provider parses segment times/airports/carrier into the
+`FlightSummary` shape; backend lifecycle (stop.meta, guard, normalized producers) shipped.
+Remaining display work is item **6**.
 
 ---
 
@@ -58,12 +54,26 @@ keyed on rounded (lat,lng,radius) to cut LiteAPI calls (mirror `MapboxService`'s
 
 ---
 
+## 6. Flight display (frontend) — finish the lifecycle  ·  ~½ day  ·  📋 SPEC'D → `DESIGN_flight_booking_lifecycle.md`
+**Why:** the backend lifecycle shipped (`354ba17`) — `stop.meta` `FlightSummary`, normalized
+producers, date guard — but the **frontend still shows the raw `offer.subtitle`** (e.g.
+`Duffel Airways · non-stop · PT6H7M`) and the booking detail screen reads **stale** meta keys.
+
+**Brief** (build order in `DESIGN_flight_booking_lifecycle.md` §7 "Remaining"):
+1. `formatDuration` + `dayOffset` + `flightRowLine` helpers in `src/lib/bookingDisplay.ts`.
+2. Offer card + builder logistics card render `flightRowLine` (duration-led, `+N`-day marker).
+3. Detail screen: per-segment block from `meta.segments` (fixes the stale `meta.route` branch).
+4. Split the date guard: **soft+override on the ingestion path**, keep hard on the offer path.
+5. Verify the `·` mojibake is real in-browser before "fixing" it.
+
+---
+
 ## Smaller cleanups (grab-bag, do alongside)
 - Remove the dead `LITEAPI_KEY` line from `trailr/.env.local` (gitignored; frontend never reads it).
 - DRY: `book/flights.tsx` re-implements `DateField` (also in `BookingSearchModal.tsx`).
 - Book landing uses text "Flight"/"Stay" as icons — swap for real icons.
 
 ## Reference docs
-`PROGRESS.md` · `DESIGN_booking_detail.md` (item 2 spec) · `DESIGN_explore_stays.md` ·
-`DESIGN_book_tab.md` · `DESIGN_hotel_recs.md` ·
+`PROGRESS.md` · `DESIGN_flight_booking_lifecycle.md` (item 6) · `DESIGN_flight_date_lock.md` ·
+`DESIGN_booking_detail.md` · `DESIGN_explore_stays.md` · `DESIGN_book_tab.md` · `DESIGN_hotel_recs.md` ·
 `trailr-pricing-ssp-anchor.md` (Downloads) · memory: `trailr-bookings`, `trailr-hotel-recs`, `trailr-fx-rates`.
