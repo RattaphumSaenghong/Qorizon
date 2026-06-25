@@ -119,9 +119,9 @@ export default function ExploreStaysScreen() {
   const selectedOffer = selectedHotel ? offersByHotelId.get(selectedHotel.hotel_id) : undefined;
 
   useEffect(() => {
-    if (hotels.length > 0 && hotels.length <= PRICE_THRESHOLD) {
+    if (hotels.length > 0) {
       setRatesQuery({
-        hotelIds: hotels.map((h) => h.hotel_id),
+        hotelIds: hotels.slice(0, PRICE_THRESHOLD).map((h) => h.hotel_id),
         check_in: checkIn,
         check_out: checkOut,
         adults: 2,
