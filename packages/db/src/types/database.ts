@@ -264,6 +264,31 @@ export interface BookingOffer {
   meta?: Record<string, unknown>;
 }
 
+export interface HotelPin {
+  hotel_id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  rating: number | null;
+  stars: number | null;
+  thumbnail?: string;
+  address?: string;
+}
+
+export interface HotelCatalogQuery {
+  latitude: number;
+  longitude: number;
+  radiusM: number;
+  limit?: number;
+}
+
+export interface HotelRatesQuery {
+  hotelIds: string[];
+  check_in: string;
+  check_out: string;
+  adults?: number;
+}
+
 export interface SearchBookingRequest {
   type: BookingType;
   trip_id?: string;
@@ -303,6 +328,41 @@ export interface GuestDetails {
   family_name: string;
   email?: string;
   phone_number?: string;
+}
+
+// ── Hotel recommendations (mirror of @trailr/shared recommendations) ──
+
+/** A hotel scored against a trip's itinerary, transit and budget. */
+export interface HotelRecommendation {
+  offer_id: string; // provider offer id → feeds the existing CreateBookingRequest flow
+  provider: BookingProvider;
+  name: string;
+  latitude: number;
+  longitude: number;
+  nightly_thb: number;
+  total_thb: number;
+  rating: number | null;
+  score: number; // 0–1 weighted blend
+  avg_km_to_stops: number;
+  station_name?: string;
+  station_meters?: number;
+  why: string;
+}
+
+export interface HotelRecommendationsResponse {
+  /** True when attractions are too geographically spread for one hotel; items is empty. */
+  multi_area: boolean;
+  anchor: { latitude: number; longitude: number } | null;
+  nights: number;
+  nightly_cap_thb: number | null;
+  items: HotelRecommendation[];
+}
+
+export interface HotelRecsParams {
+  check_in?: string;
+  check_out?: string;
+  guests?: number;
+  nightly_cap?: number;
 }
 
 export interface NotificationRow {

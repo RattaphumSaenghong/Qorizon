@@ -50,6 +50,7 @@ import type { AssigneeMember } from '../../src/components/WhoForControl';
 import { PaidByControl } from '../../src/components/PaidByControl';
 import { MemberSwitcher } from '../../src/components/MemberSwitcher';
 import { BookingSearchModal } from '../../src/components/BookingSearchModal';
+import { HotelRecsSheet } from '../../src/components/HotelRecsSheet';
 import { computeSettlement } from '../../src/lib/budget';
 import { suggestPlaces, retrievePlace, newSessionToken, type PlaceSuggestion } from '../../src/lib/places';
 
@@ -219,6 +220,8 @@ function LogisticsBlock({
   onEdit,
   onRemove,
   inboxCount,
+  onSuggest,
+  onExplore,
 }: {
   title: string;
   type: LogisticsType;
@@ -231,6 +234,8 @@ function LogisticsBlock({
   onEdit: (stop: StopWithMedia) => void;
   onRemove: (id: string) => void;
   inboxCount: number;
+  onSuggest?: () => void;
+  onExplore?: () => void;
 }) {
   const icon = type === 'flight' ? '✈' : '🛏';
   const subtotal = stops.reduce((sum, s) => sum + (s.cost ?? 0), 0);
@@ -248,6 +253,8 @@ function LogisticsBlock({
           ) : null}
         </View>
         <View style={styles.logisticsHeaderActions}>
+          {onSuggest ? <Btn sm solid onPress={onSuggest}>Suggest</Btn> : null}
+          {onExplore ? <Btn sm onPress={onExplore}>Explore</Btn> : null}
           <Btn sm onPress={() => onAdd(type)}>Search</Btn>
           <Btn sm onPress={() => onInbox(type)}>Inbox</Btn>
         </View>
@@ -400,6 +407,7 @@ export default function BuilderScreen() {
   const [filterMemberId, setFilterMemberId] = useState<string | null>(null);
   const [bookingType, setBookingType] = useState<LogisticsType>('flight');
   const [bookingOpen, setBookingOpen] = useState(false);
+  const [recsOpen, setRecsOpen] = useState(false);
 
   // Debounced autocomplete when formLoc changes (skip if change came from a selection).
   useEffect(() => {
@@ -826,6 +834,12 @@ export default function BuilderScreen() {
   const fallback = { latitude: 35.0116, longitude: 135.7681 };
   const firstDate = dayRows.find((d: TripDayRow) => d.date)?.date ?? null;
   const tripNights = Math.max(1, dayRows.length);
+  const lastDate = trip.end_date ?? null;
+  // "Suggest stays" needs an anchor (≥2 pinned attractions, excluding logistics) + a known date.
+  const attractionPins = stops.filter(
+    (s) => !['hotel', 'flight', 'transport'].includes(s.category) && s.latitude != null && s.longitude != null,
+  );
+  const canSuggest = attractionPins.length >= 2 && !!(firstDate ?? trip.start_date);
 
   const dragStop = dragActiveId ? stops.find((s) => s.id === dragActiveId) : null;
 
@@ -884,6 +898,8 @@ export default function BuilderScreen() {
             onEdit={openEdit}
             onRemove={removeStop}
             inboxCount={stayInventory.length}
+            onSuggest={canSuggest ? () => setRecsOpen(true) : undefined}
+            onExplore={() => router.push(`/explore-stays?tripId=${tripId}`)}
           />
         </View>
         {days.length === 0 && unassigned.length === 0 ? (
@@ -1100,6 +1116,19 @@ export default function BuilderScreen() {
           toast(bookingType === 'flight' ? 'Flight added to planner' : 'Stay added to planner');
         }}
         onManual={openManualLogistics}
+      />
+
+      <HotelRecsSheet
+        visible={recsOpen}
+        tripId={tripId}
+        firstDate={firstDate}
+        lastDate={lastDate}
+        onClose={() => setRecsOpen(false)}
+        onBooked={() => {
+          setRecsOpen(false);
+          refreshStops();
+          toast('Stay added to planner');
+        }}
       />
 
       {/* Add / edit stop modal */}

@@ -13,6 +13,8 @@ const RATING_MAX = 10; // provider review-score scale (LiteAPI/mock ~0–10)
 const LODGING_FRACTION = 0.35; // share of total budget assumed to go to lodging
 const DEFAULT_NIGHTS = 3;
 const TOP_N = 5;
+const SEARCH_MIN_RADIUS_M = 1000;
+const SEARCH_MAX_RADIUS_M = 8000;
 
 // Transport modes for which station proximity matters.
 const TRANSIT_MODES: ReadonlySet<TransportMode> = new Set(['train', 'transit', 'mixed']);
@@ -81,36 +83,55 @@ export class RecommendationsService {
 
     const anchor = medoid(points);
     const checkIn = params.checkIn ?? toYmd(trip.start_date);
-    const offers = await this.hotels.searchHotels({
-      city: trip.destination ?? undefined,
+    const checkOut = params.checkOut ?? toYmd(trip.end_date) ?? addYmdDays(checkIn, nights);
+    if (!checkIn || !checkOut) {
+      return { multi_area: false, anchor, nights, nightly_cap_thb: nightlyCap, items: [] };
+    }
+
+    const spreadKm = maxPairwiseKm(points);
+    const catalog = await this.hotels.searchHotelCatalog({
+      latitude: anchor.latitude,
+      longitude: anchor.longitude,
+      radiusM: searchRadiusM(spreadKm),
+      limit: 40,
+    });
+    const pinsById = new Map(catalog.map((pin) => [pin.hotel_id, pin]));
+    const offers = await this.hotels.searchHotelRates({
+      hotelIds: catalog.map((pin) => pin.hotel_id),
       check_in: checkIn,
-      nights,
+      check_out: checkOut,
+      adults: params.guests ?? 2,
     });
 
     // Transit scoring only kicks in for transit-led trips with Mapbox configured.
     const transitActive =
       this.mapbox.enabled && TRANSIT_MODES.has(trip.transport_mode as TransportMode);
 
-    const candidates = offers.filter((o) => o.latitude != null && o.longitude != null);
+    const candidates = offers.flatMap((o) => {
+      const hotelId = readMetaString(o.meta, 'hotel_id');
+      const pin = hotelId ? pinsById.get(hotelId) : null;
+      if (!pin) return [];
+      return [{ offer: o, pin }];
+    });
     const stations = await Promise.all(
-      candidates.map((o) =>
-        transitActive ? this.mapbox.nearestStation(o.latitude!, o.longitude!) : Promise.resolve(null),
+      candidates.map(({ pin }) =>
+        transitActive ? this.mapbox.nearestStation(pin.latitude, pin.longitude) : Promise.resolve(null),
       ),
     );
 
     const items = candidates
-      .map((o, i) => {
-        const hotel: GeoPoint = { latitude: o.latitude!, longitude: o.longitude! };
+      .map(({ offer: o, pin }, i) => {
+        const hotel: GeoPoint = { latitude: pin.latitude, longitude: pin.longitude };
         const avgKm = avg(points.map((p) => haversineKm(hotel, p)));
         const nightly = readNightly(o.meta, o.amount_thb, nights);
-        const rating = o.rating ?? null;
+        const rating = o.rating ?? pin.rating ?? null;
         const station = stations[i];
 
         const score = scoreHotel({ avgKm, nightly, nightlyCap, rating, transitActive, station });
         return {
           offer_id: o.id,
           provider: o.provider,
-          name: o.title,
+          name: pin.name,
           latitude: hotel.latitude,
           longitude: hotel.longitude,
           nightly_thb: nightly,
@@ -245,6 +266,11 @@ function resolveNightlyCap(override: number | undefined, budget: number | null, 
   return null;
 }
 
+function searchRadiusM(spreadKm: number): number {
+  const radiusKm = Math.max(1, Math.min(8, spreadKm / 2 + 1));
+  return Math.max(SEARCH_MIN_RADIUS_M, Math.min(SEARCH_MAX_RADIUS_M, Math.round(radiusKm * 1000)));
+}
+
 function readNightly(meta: Record<string, unknown> | undefined, totalThb: number, nights: number): number {
   const fromMeta = meta?.['nightly'];
   if (typeof fromMeta === 'number' && fromMeta > 0) return fromMeta;
@@ -255,6 +281,16 @@ function readNightly(meta: Record<string, unknown> | undefined, totalThb: number
 
 function toYmd(d: Date | null | undefined): string | undefined {
   return d ? d.toISOString().slice(0, 10) : undefined;
+}
+function addYmdDays(ymd: string | undefined, days: number): string | undefined {
+  if (!ymd) return undefined;
+  const date = new Date(`${ymd}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+function readMetaString(meta: Record<string, unknown> | undefined, key: string): string | null {
+  const value = meta?.[key];
+  return typeof value === 'string' ? value : null;
 }
 const avg = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
 const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));

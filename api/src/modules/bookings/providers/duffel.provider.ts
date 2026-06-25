@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import type { BookingConfirmation, BookingOffer, PassengerDetails } from '@trailr/shared';
+import { FxService } from '../../fx/fx.service';
 import type { FlightProviderApi, FlightSearch } from './booking-provider';
 
 interface DuffelOffer {
@@ -20,14 +21,13 @@ export class DuffelFlightProvider implements FlightProviderApi {
   readonly name = 'duffel';
   private readonly base = 'https://api.duffel.com';
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly fx: FxService,
+  ) {}
 
   private get apiKey(): string {
     return this.config.get<string>('DUFFEL_API_KEY')!;
-  }
-
-  private get thbRate(): number {
-    return Number(this.config.get('BOOKING_USD_THB_RATE') ?? 36);
   }
 
   private headers(): Record<string, string> {
@@ -66,6 +66,7 @@ export class DuffelFlightProvider implements FlightProviderApi {
     if (!offersRes.ok) throw new Error(`Duffel offer search failed: ${offersRes.status}`);
     const offersData = (await offersRes.json()) as { data?: DuffelOffer[] };
 
+    const usdThb = await this.fx.usdToThb();
     return (offersData.data ?? []).map((offer) => {
       const segments = offer.slices?.[0]?.segments ?? [];
       const passengerIds = [
@@ -74,7 +75,7 @@ export class DuffelFlightProvider implements FlightProviderApi {
       ];
       const amount = Number(offer.total_amount ?? 0);
       const currency = offer.total_currency ?? 'USD';
-      const amountThb = currency === 'THB' ? amount : amount * this.thbRate;
+      const amountThb = currency === 'THB' ? amount : amount * usdThb;
       return {
         id: offer.id,
         type: 'flight' as const,

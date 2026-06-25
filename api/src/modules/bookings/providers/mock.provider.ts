@@ -1,5 +1,13 @@
 import type { BookingConfirmation, BookingOffer, GuestDetails, PassengerDetails } from '@trailr/shared';
-import type { FlightProviderApi, FlightSearch, HotelProviderApi, HotelSearch } from './booking-provider';
+import type {
+  FlightProviderApi,
+  FlightSearch,
+  HotelCatalogQuery,
+  HotelPin,
+  HotelProviderApi,
+  HotelRatesQuery,
+  HotelSearch,
+} from './booking-provider';
 
 /** Deterministic offers for dev: no API keys, no network. */
 export class MockFlightProvider implements FlightProviderApi {
@@ -56,6 +64,57 @@ export class MockHotelProvider implements HotelProviderApi {
       rating: h.star,
       meta: { nightly: h.nightly, nights, check_in: p.check_in },
     }));
+  }
+
+  async searchHotelCatalog(p: HotelCatalogQuery): Promise<HotelPin[]> {
+    const seeds = [
+      { name: 'Neighborhood House', dx: 0.006, dy: 0.004, rating: 8.8, stars: 4 },
+      { name: 'Station Rooms', dx: -0.005, dy: 0.007, rating: 8.4, stars: 3 },
+      { name: 'Garden Stay', dx: 0.011, dy: -0.006, rating: 9.1, stars: 4 },
+      { name: 'Tiny Capsule', dx: -0.012, dy: -0.004, rating: 7.9, stars: 2 },
+      { name: 'Riverside Hotel', dx: 0.018, dy: 0.01, rating: 8.2, stars: 3 },
+    ];
+    return seeds.slice(0, p.limit ?? seeds.length).map((h, i) => ({
+      hotel_id: `mock-hotel-${i}`,
+      name: h.name,
+      latitude: p.latitude + h.dy,
+      longitude: p.longitude + h.dx,
+      rating: h.rating,
+      stars: h.stars,
+      address: 'Mock district',
+    }));
+  }
+
+  async searchHotelRates(p: HotelRatesQuery): Promise<BookingOffer[]> {
+    const nights = Math.max(1, Math.round((Date.parse(p.check_out) - Date.parse(p.check_in)) / 86_400_000));
+    return p.hotelIds.map((id, i) => {
+      const nightly = 1600 + i * 420;
+      return {
+        id: `mock-rate-${id}`,
+        type: 'hotel' as const,
+        provider: 'mock' as const,
+        title: `Mock stay ${i + 1}`,
+        subtitle: `${nights} nights - ${p.adults ?? 2} adults`,
+        amount_thb: nightly * nights,
+        rating: 8.2 + (i % 3) * 0.3,
+        meta: {
+          hotel_id: id,
+          check_in: p.check_in,
+          check_out: p.check_out,
+          nights,
+          nightly,
+          pricing: {
+            net: nightly * nights * 0.82,
+            ssp: nightly * nights,
+            currency: 'THB',
+            basis: 'ssp',
+            implied_markup: 0.22,
+            flags: [],
+            display_price: nightly * nights,
+          },
+        },
+      };
+    });
   }
 
   async bookHotel(rateId: string, guestDetails?: GuestDetails): Promise<BookingConfirmation> {

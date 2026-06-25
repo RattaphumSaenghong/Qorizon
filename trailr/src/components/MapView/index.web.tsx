@@ -23,6 +23,7 @@ export interface PostPin {
   photoUrl?: string;
   /** 1-based order label, drawn inside the pin (builder route sequence). */
   index?: number;
+  priceLabel?: string;
   markerKind?: 'visited' | 'planned';
   onPress?: () => void;
 }
@@ -185,6 +186,8 @@ export function MapView({
         inner.style.backgroundImage = `url('${post.photoUrl}')`;
         inner.style.backgroundSize = 'cover';
         inner.style.backgroundPosition = 'center';
+      } else if (post.priceLabel) {
+        inner.innerHTML = `<span style="font-weight:800;font-size:${isActive ? 14 : 12}px;color:#e07a5f;white-space:nowrap;">${post.priceLabel}</span>`;
       } else if (post.index != null) {
         inner.innerHTML = `<span style="font-weight:800;font-size:${isActive ? 22 : 16}px;color:#e07a5f;">${post.index}</span>`;
       } else if (isPlanned) {

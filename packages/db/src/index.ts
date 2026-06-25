@@ -17,12 +17,14 @@ export * from './queries/live';
 export * from './queries/notifications';
 export * from './queries/media';
 export * from './queries/bookings';
+export * from './queries/hotel-search';
 export * from './queries/inventory';
 export * from './queries/saved';
 export * from './queries/comments';
 export * from './queries/members';
 export * from './queries/messages';
 export * from './queries/search';
+export * from './queries/recommendations';
 
 // React Query hooks
 export * from './hooks/useTrip';
@@ -33,9 +35,11 @@ export * from './hooks/useLive';
 export * from './hooks/useNotifications';
 export * from './hooks/useMedia';
 export * from './hooks/useBookings';
+export * from './hooks/useHotelSearch';
 export * from './hooks/useInventory';
 export * from './hooks/useSaved';
 export * from './hooks/useComments';
 export * from './hooks/useMembers';
 export * from './hooks/useMessages';
 export * from './hooks/useSearch';
+export * from './hooks/useHotelRecommendations';

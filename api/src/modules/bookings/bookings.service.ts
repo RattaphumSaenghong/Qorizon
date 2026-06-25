@@ -13,10 +13,13 @@ import {
   FLIGHT_PROVIDER,
   HOTEL_PROVIDER,
   type FlightProviderApi,
+  type HotelPin,
   type HotelProviderApi,
 } from './providers/booking-provider';
 import { SearchBookingDto } from './dto/search-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
+import { HotelCatalogQueryDto } from './dto/hotel-catalog-query.dto';
+import { HotelRatesDto } from './dto/hotel-rates.dto';
 
 // Internal estimate of provider/affiliate payout. This is not user-facing markup.
 const ESTIMATED_PROVIDER_COMMISSION_RATE = 0.08;
@@ -40,6 +43,23 @@ export class BookingsService {
       });
     }
     return this.hotelProvider.searchHotels({ city: dto.city, check_in: dto.check_in, nights: dto.nights });
+  }
+
+  async hotelCatalog(query: HotelCatalogQueryDto): Promise<HotelPin[]> {
+    const latitude = Number(query.lat);
+    const longitude = Number(query.lng);
+    const radiusM = Math.min(20_000, Math.max(250, Math.round(Number(query.radius))));
+    const limit = Math.min(100, Math.max(1, Math.round(Number(query.limit ?? 50))));
+    return this.hotelProvider.searchHotelCatalog({ latitude, longitude, radiusM, limit });
+  }
+
+  async hotelRates(dto: HotelRatesDto): Promise<BookingOffer[]> {
+    return this.hotelProvider.searchHotelRates({
+      hotelIds: dto.hotelIds,
+      check_in: dto.check_in,
+      check_out: dto.check_out,
+      adults: dto.adults ?? 2,
+    });
   }
 
   /** Book an offer (status 'pending'). If a trip + assignees are given, also

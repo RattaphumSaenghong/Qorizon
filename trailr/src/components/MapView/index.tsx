@@ -26,6 +26,7 @@ interface PostPin {
   photoUrl?: string;
   /** 1-based order label, drawn inside the pin (builder route sequence). */
   index?: number;
+  priceLabel?: string;
   markerKind?: 'visited' | 'planned';
   onPress?: () => void;
 }

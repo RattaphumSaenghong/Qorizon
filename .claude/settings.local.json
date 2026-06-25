@@ -82,7 +82,25 @@
       "Bash(echo \"===SHARED EXIT $?===\")",
       "Bash(echo \"===PRISMA EXIT $?===\")",
       "Bash(echo \"===API BUILD EXIT $?===\")",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{console.log\\(JSON.stringify\\(JSON.parse\\(s\\),null,2\\)\\)}\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"http://localhost:3000/api/v1/trips/bbbb0001-0000-0000-0000-000000000001/hotel-recommendations\")",
+      "Bash(node -e 'const{PrismaClient}=require\\('\\\\''@prisma/client'\\\\''\\);const p=new PrismaClient\\(\\);const T='\\\\''bbbb0001-0000-0000-0000-000000000001'\\\\'';\\(async\\(\\)=>{await p.stop.deleteMany\\({where:{trip_id:T}}\\);await p.tripDay.deleteMany\\({where:{trip_id:T}}\\);await p.trip.deleteMany\\({where:{id:T}}\\);console.log\\('\\\\''test trip deleted'\\\\''\\);await p.$disconnect\\(\\)}\\)\\(\\)')",
+      "Bash(node -e \"fetch\\('https://api.frankfurter.dev/v1/latest?base=USD&symbols=THB'\\).then\\(r=>r.json\\(\\)\\).then\\(j=>console.log\\('OK',JSON.stringify\\(j\\)\\)\\).catch\\(e=>console.log\\('ERR',e.message\\)\\)\")",
+      "WebFetch(domain:docs.liteapi.travel)",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); const k=process.env.LITEAPI_KEY; console.log\\('LITEAPI_KEY set:', !!\\(k && k.trim\\(\\)\\), k && k.trim\\(\\) ? '\\(len '+k.trim\\(\\).length+'\\)' : '\\(empty/absent\\)'\\); const d=process.env.DUFFEL_API_KEY; console.log\\('DUFFEL set:', !!\\(d&&d.trim\\(\\)\\)\\);\")",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); const k=process.env.LITEAPI_KEY; console.log\\('LITEAPI_KEY set:', !!\\(k && k.trim\\(\\)\\), k && k.trim\\(\\) ? '\\(len '+k.trim\\(\\).length+', prefix '+k.trim\\(\\).slice\\(0,4\\)+'…\\)' : '\\(EMPTY/ABSENT\\)'\\);\")",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); const k=process.env.LITEAPI_KEY; console.log\\('LITEAPI_KEY:', !!\\(k&&k.trim\\(\\)\\) ? 'SET \\(len '+k.trim\\(\\).length+', prefix '+k.trim\\(\\).slice\\(0,4\\)+'…\\)' : 'MISSING'\\);\")",
+      "Bash(node -e ' *)",
+      "Bash(node smoke-lite.mjs)",
+      "Bash(grep -nA12 \"hotelCatalog\\\\|hotelRates\" src/modules/bookings/bookings.service.ts)",
+      "Bash(node --enable-source-maps dist/src/main.js > /tmp/api-smoke2.out 2>&1)",
+      "Bash(powershell -Command 'Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Write-Host '\\\\''port cleared'\\\\''')",
+      "Bash(node smoke-e2e.mjs)",
+      "Bash(node smoke-recs2.mjs)",
+      "Bash(git check-ignore *)",
+      "Bash(grep -iE \"\\\\.env$|/dist/\")"
     ]
   }
 }

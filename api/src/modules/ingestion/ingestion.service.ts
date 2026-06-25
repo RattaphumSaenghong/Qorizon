@@ -5,6 +5,7 @@ import type { InventoryItem, Prisma } from '@prisma/client';
 import type { BookingType, InventoryItemRow, InventoryStatus } from '@trailr/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PolicyService } from '../../authz/policy.service';
+import { FxService } from '../fx/fx.service';
 import { IngestEmailDto } from './dto/ingest-email.dto';
 import { parseJsonLd, type ParsedInventory } from './parsers/jsonld.parser';
 import { parseWithAnthropic } from './parsers/llm.parser';
@@ -15,12 +16,13 @@ export class IngestionService {
     private readonly prisma: PrismaService,
     private readonly policy: PolicyService,
     private readonly config: ConfigService,
+    private readonly fx: FxService,
   ) {}
 
   async ingestEmail(dto: IngestEmailDto): Promise<InventoryItemRow> {
     this.assertSignature(dto);
     const user = await this.findRecipient(dto);
-    const thbRate = Number(this.config.get('BOOKING_USD_THB_RATE') ?? 36);
+    const thbRate = await this.fx.usdToThb();
     const parsed =
       parseJsonLd(dto.body_html, thbRate) ??
       this.parseHeuristic(dto.subject, dto.body_text ?? '') ??

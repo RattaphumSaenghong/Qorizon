@@ -105,6 +105,9 @@ export default function ExploreScreen() {
   const grid = (
     <ScrollView style={styles.gridCol} contentContainerStyle={[styles.gridContent, isPhone && styles.gridContentPhone]}>
       <View style={styles.categories}>
+        <TouchableOpacity onPress={() => router.push('/explore-stays')}>
+          <Chip dot={false} accent>Explore stays</Chip>
+        </TouchableOpacity>
         {CATEGORIES.map((c) => (
           <TouchableOpacity key={c} onPress={() => setActiveCategory(c)}>
             <Chip dot={false} accent={c === activeCategory}>{c}</Chip>
@@ -230,4 +233,3 @@ const styles = StyleSheet.create({
   nearByThumb: { flex: 1, height: 64, backgroundColor: colors.paper, borderRadius: 6, borderWidth: 1, borderColor: colors.line },
   railPhone: { padding: spacing.lg, gap: spacing.md },
 });
-
