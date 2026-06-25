@@ -12,17 +12,11 @@ Do **1 first** — the map UI has never run in a browser, so verify before build
 
 ---
 
-## 1. Verify the Book / Explore map UI in the running app  ·  ~½ day  ·  DO FIRST
-**Why:** `book/stays.tsx` (map browser) + `HotelDetailSheet` typecheck and the data endpoints
-are smoke-tested, but the **UI itself was never run** — `MapView.onBoundsChange` firing is the
-top open risk (`DESIGN_explore_stays.md` §9).
-
-**Brief:** start API (`node --enable-source-maps dist/src/main.js` from `api/`) + Expo web
-(`.claude/launch.json` → `trailr-web`, port 8081). Log in (somchai@trailr.app / password123;
-web persists session in `localStorage` keys `trailr.access_token`/`trailr.refresh_token`).
-Drive: `/(tabs)/book` → **Stays** → search a city → **"Search this area"** → pins appear →
-zoom in (≤40 in view) → prices load → tap a pin → `HotelDetailSheet` → **Book** / **Add to trip**.
-Watch console for errors; confirm bounds→center+radius works. Fix what breaks.
+## ~~1. Verify the Book / Explore map UI~~ ✅ DONE (`8d36d78`)
+Map renders, place search works, catalog pins appear, rates load and show THB prices on pins.
+Fixed a bug: rates never loaded in dense areas because `hotels.length <= PRICE_THRESHOLD`
+always failed with `limit:80`. Now always fetches rates for `hotels.slice(0, PRICE_THRESHOLD)`.
+`HotelDetailSheet` opens with full price + /night, Book button active. Verified in browser.
 
 ---
 

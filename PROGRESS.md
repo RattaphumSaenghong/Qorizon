@@ -1,6 +1,6 @@
 # Trailr — Progress & Handoff
 
-> Last updated: 2026-06-25
+> Last updated: 2026-06-25 (session 2)
 > Read this first when resuming. Pairs with `DESIGN_hotel_recs.md`, `DESIGN_explore_stays.md`,
 > `DESIGN_book_tab.md`, and `trailr-pricing-ssp-anchor.md` (pricing spec, kept in Downloads).
 
@@ -9,6 +9,7 @@
 ## Where things stand (all committed)
 
 Recent commits on `main`:
+- `8d36d78` — fix: rates always load for first 40 hotels (stays map bug)
 - `ec16038` — Book tab (Flights/Stays) + Saved "Booked" list
 - `e8a4fd1` — live LiteAPI hotels: FX, SSP pricing floor, map search & recs UI
 - `6c7e091` — bookings refactor, hotel recs engine, search, trip chat, inventory
@@ -57,8 +58,10 @@ sandbox `LITEAPI_KEY` is in `api/.env` (gitignored). Smoke-tested end-to-end aga
 ## Open / deferred
 - **No per-booking detail screen.** Tapping a Booked card does nothing by design. If wanted,
   add `booking/view/[id]` reading one `BookingRow` (distinct from trip-scoped `booking/[id]`).
-- **Not browser-tested:** Explore/Book map UI (pan/zoom, "Search this area", pin→sheet, tab
-  clicks). Typecheck + API-data smoke pass; Expo preview run was declined.
+- **Browser-tested** (`8d36d78`): map renders, place search, "Search this area" → catalog pins,
+  rates load for first 40 hotels, price labels on pins, HotelDetailSheet with live price + Book.
+  LiteAPI rejects radius <~1000m (returns 400); minimum clamped to 250 in service but LiteAPI
+  enforces its own floor — effectively ~1km minimum works in practice.
 - **Per-night vs per-stay:** LiteAPI net/ssp are per-stay totals (same basis) — units bug avoided.
 - Dead `LITEAPI_KEY` line in `trailr/.env.local` (gitignored, harmless — frontend never reads it).
 - `flights.tsx` re-implements `DateField` (also in `BookingSearchModal`) — DRY later.
