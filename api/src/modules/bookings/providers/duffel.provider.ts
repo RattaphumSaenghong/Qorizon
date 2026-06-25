@@ -3,6 +3,22 @@ import type { BookingConfirmation, BookingOffer, PassengerDetails } from '@trail
 import { FxService } from '../../fx/fx.service';
 import type { FlightProviderApi, FlightSearch } from './booking-provider';
 
+interface DuffelPlace {
+  iata_code?: string;
+  name?: string;
+  city_name?: string;
+}
+
+interface DuffelSegment {
+  departing_at?: string;
+  arriving_at?: string;
+  origin?: DuffelPlace;
+  destination?: DuffelPlace;
+  marketing_carrier?: { iata_code?: string; name?: string };
+  marketing_carrier_flight_number?: string;
+  passengers?: Array<{ passenger_id?: string }>;
+}
+
 interface DuffelOffer {
   id: string;
   total_amount?: string;
@@ -10,9 +26,9 @@ interface DuffelOffer {
   owner?: { name?: string };
   slices?: Array<{
     duration?: string;
-    segments?: Array<{
-      passengers?: Array<{ passenger_id?: string }>;
-    }>;
+    origin?: DuffelPlace;
+    destination?: DuffelPlace;
+    segments?: DuffelSegment[];
   }>;
   passengers?: Array<{ id?: string }>;
 }
@@ -68,7 +84,26 @@ export class DuffelFlightProvider implements FlightProviderApi {
 
     const usdThb = await this.fx.usdToThb();
     return (offersData.data ?? []).map((offer) => {
-      const segments = offer.slices?.[0]?.segments ?? [];
+      const slice = offer.slices?.[0];
+      const segments = slice?.segments ?? [];
+      const firstSeg = segments[0];
+      const lastSeg = segments[segments.length - 1];
+      // Real itinerary from the segments — drives the flight detail card and the
+      // trip-date lock (see DESIGN_flight_date_lock.md). Fall back to the request
+      // origin/destination when a field is absent.
+      const originCode = firstSeg?.origin?.iata_code ?? slice?.origin?.iata_code ?? origin;
+      const destCode = lastSeg?.destination?.iata_code ?? slice?.destination?.iata_code ?? destination;
+      const departingAt = firstSeg?.departing_at ?? null;
+      const arrivingAt = lastSeg?.arriving_at ?? null;
+      const itinerary = segments.map((s) => ({
+        origin: s.origin?.iata_code ?? null,
+        destination: s.destination?.iata_code ?? null,
+        departing_at: s.departing_at ?? null,
+        arriving_at: s.arriving_at ?? null,
+        carrier: s.marketing_carrier?.iata_code ?? null,
+        carrier_name: s.marketing_carrier?.name ?? null,
+        flight_number: s.marketing_carrier_flight_number ?? null,
+      }));
       const passengerIds = [
         ...(offer.passengers ?? []).map((x) => x.id).filter(Boolean),
         ...segments.flatMap((s) => (s.passengers ?? []).map((x) => x.passenger_id).filter(Boolean)),
@@ -80,14 +115,19 @@ export class DuffelFlightProvider implements FlightProviderApi {
         id: offer.id,
         type: 'flight' as const,
         provider: 'duffel' as const,
-        title: `${origin} -> ${destination}`,
-        subtitle: `${offer.owner?.name ?? 'Duffel flight'} · ${segments.length <= 1 ? 'non-stop' : `${segments.length - 1} stop`} · ${offer.slices?.[0]?.duration ?? departureDate}`,
+        title: `${originCode} -> ${destCode}`,
+        subtitle: `${offer.owner?.name ?? 'Duffel flight'} · ${segments.length <= 1 ? 'non-stop' : `${segments.length - 1} stop`} · ${slice?.duration ?? departingAt ?? departureDate}`,
         amount_thb: Math.round(amountThb),
         meta: {
           offer_request_id: offerRequestId,
           total_amount: offer.total_amount,
           total_currency: currency,
           passenger_ids: Array.from(new Set(passengerIds)),
+          origin: originCode,
+          destination: destCode,
+          departing_at: departingAt,
+          arriving_at: arrivingAt,
+          segments: itinerary,
           raw: offer,
         },
       };
