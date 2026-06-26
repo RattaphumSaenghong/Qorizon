@@ -33,6 +33,11 @@ interface DuffelOffer {
   passengers?: Array<{ id?: string }>;
 }
 
+function stopLabel(stops: number): string {
+  if (stops <= 0) return 'non-stop';
+  return `${stops} stop${stops === 1 ? '' : 's'}`;
+}
+
 function mapSlice(
   slice: NonNullable<DuffelOffer['slices']>[number] | undefined,
   fallbackOrigin: string,
@@ -42,6 +47,7 @@ function mapSlice(
   const segments = slice?.segments ?? [];
   const firstSeg = segments[0];
   const lastSeg = segments[segments.length - 1];
+  // Real itinerary from the segments drives flight cards; fall back to the request route when absent.
   const originCode = firstSeg?.origin?.iata_code ?? slice?.origin?.iata_code ?? fallbackOrigin;
   const destCode = lastSeg?.destination?.iata_code ?? slice?.destination?.iata_code ?? fallbackDestination;
   const departingAt = firstSeg?.departing_at ?? null;
@@ -142,34 +148,10 @@ export class DuffelFlightProvider implements FlightProviderApi {
         ),
       );
       const outbound = mappedSlices[0] ?? mapSlice(undefined, origin, destination, offer.owner?.name ?? null);
-      const slice = offer.slices?.[0];
-      const segments = slice?.segments ?? [];
-      const firstSeg = segments[0];
-      const lastSeg = segments[segments.length - 1];
-      // Real itinerary from the segments — drives the flight detail card and the
-      // trip-date lock (see DESIGN_flight_date_lock.md). Fall back to the request
-      // origin/destination when a field is absent.
-      const originCode = firstSeg?.origin?.iata_code ?? slice?.origin?.iata_code ?? origin;
-      const destCode = lastSeg?.destination?.iata_code ?? slice?.destination?.iata_code ?? destination;
-      const departingAt = firstSeg?.departing_at ?? null;
-      const arrivingAt = lastSeg?.arriving_at ?? null;
-      const carrier = firstSeg?.marketing_carrier?.iata_code ?? null;
-      const carrierName = firstSeg?.marketing_carrier?.name ?? offer.owner?.name ?? null;
-      const flightNumber = firstSeg?.marketing_carrier_flight_number ?? null;
-      const stops = Math.max(0, segments.length - 1);
-      const itinerary = segments.map((s) => ({
-        origin: s.origin?.iata_code ?? null,
-        destination: s.destination?.iata_code ?? null,
-        departing_at: s.departing_at ?? null,
-        arriving_at: s.arriving_at ?? null,
-        carrier: s.marketing_carrier?.iata_code ?? null,
-        carrier_name: s.marketing_carrier?.name ?? null,
-        flight_number: s.marketing_carrier_flight_number ?? null,
-      }));
       const passengerIds = [
         ...(offer.passengers ?? []).map((x) => x.id).filter(Boolean),
-        ...(offer.slices ?? []).flatMap((slice) =>
-          (slice.segments ?? []).flatMap((s) => (s.passengers ?? []).map((x) => x.passenger_id).filter(Boolean)),
+        ...(offer.slices ?? []).flatMap((sl) =>
+          (sl.segments ?? []).flatMap((s) => (s.passengers ?? []).map((x) => x.passenger_id).filter(Boolean)),
         ),
       ];
       const amount = Number(offer.total_amount ?? 0);
@@ -180,7 +162,7 @@ export class DuffelFlightProvider implements FlightProviderApi {
         type: 'flight' as const,
         provider: 'duffel' as const,
         title: `${outbound.origin} -> ${outbound.destination}`,
-        subtitle: `${offer.owner?.name ?? 'Duffel flight'} · ${segments.length <= 1 ? 'non-stop' : `${segments.length - 1} stop`} · ${slice?.duration ?? departingAt ?? departureDate}`,
+        subtitle: `${offer.owner?.name ?? 'Duffel flight'} · ${stopLabel(outbound.stops)} · ${outbound.duration ?? outbound.dep_at ?? departureDate}`,
         amount_thb: Math.round(amountThb),
         meta: {
           offer_request_id: offerRequestId,
