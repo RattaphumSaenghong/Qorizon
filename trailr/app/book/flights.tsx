@@ -21,6 +21,7 @@ import { colors, fontSize, radius, shadow, spacing } from '../../src/theme/token
 
 type TripType = 'one-way' | 'round-trip';
 type FlightSort = 'cheapest' | 'fastest' | 'best';
+type Gender = 'm' | 'f';
 
 function todayPlus(days: number): string {
   const date = new Date();
@@ -44,7 +45,11 @@ function stopLabel(stops: number): string {
 }
 
 function airline(summary: FlightSummary | null, offer: BookingOffer): string {
-  return summary?.carrier_name ?? summary?.carrier ?? offer.subtitle.split(' - ')[0] ?? 'Flight';
+  return summary?.carrier_name ?? summary?.carrier ?? offer.subtitle.split(' · ')[0] ?? 'Flight';
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
 function routeSummary(offer: BookingOffer): string {
@@ -206,11 +211,13 @@ function PassengerModal({
   booking,
   givenName,
   familyName,
+  gender,
   bornOn,
   email,
   phone,
   onGivenName,
   onFamilyName,
+  onGender,
   onBornOn,
   onEmail,
   onPhone,
@@ -222,18 +229,26 @@ function PassengerModal({
   booking: boolean;
   givenName: string;
   familyName: string;
+  gender: Gender | null;
   bornOn: string;
   email: string;
   phone: string;
   onGivenName: (value: string) => void;
   onFamilyName: (value: string) => void;
+  onGender: (value: Gender) => void;
   onBornOn: (value: string) => void;
   onEmail: (value: string) => void;
   onPhone: (value: string) => void;
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const canConfirm = givenName.trim().length > 0 && familyName.trim().length > 0;
+  const canConfirm =
+    givenName.trim().length > 0 &&
+    familyName.trim().length > 0 &&
+    gender != null &&
+    bornOn.trim().length > 0 &&
+    isValidEmail(email) &&
+    phone.trim().length > 0;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -246,27 +261,39 @@ function PassengerModal({
             </View>
             <Pressable hitSlop={8} onPress={onClose}><Text style={styles.close}>x</Text></Pressable>
           </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Title *</Text>
+            <View style={styles.tripTypeRow}>
+              <Pressable style={[styles.pill, gender === 'm' && styles.pillActive]} onPress={() => onGender('m')}>
+                <Text style={[styles.pillText, gender === 'm' && styles.pillTextActive]}>Mr</Text>
+              </Pressable>
+              <Pressable style={[styles.pill, gender === 'f' && styles.pillActive]} onPress={() => onGender('f')}>
+                <Text style={[styles.pillText, gender === 'f' && styles.pillTextActive]}>Ms</Text>
+              </Pressable>
+            </View>
+          </View>
           <View style={styles.row}>
             <View style={styles.field}>
-              <Text style={styles.label}>First name</Text>
+              <Text style={styles.label}>First name *</Text>
               <TextInput style={styles.input} value={givenName} onChangeText={onGivenName} placeholder="First name" placeholderTextColor={colors.sub} />
             </View>
             <View style={styles.field}>
-              <Text style={styles.label}>Last name</Text>
+              <Text style={styles.label}>Last name *</Text>
               <TextInput style={styles.input} value={familyName} onChangeText={onFamilyName} placeholder="Last name" placeholderTextColor={colors.sub} />
             </View>
           </View>
-          <DateField label="Date of birth" value={bornOn} onChange={onBornOn} initialYear={1990} placeholder="Select date of birth" />
+          <DateField label="Date of birth *" value={bornOn} onChange={onBornOn} initialYear={1990} placeholder="Select date of birth" />
           <View style={styles.row}>
             <View style={styles.field}>
-              <Text style={styles.label}>Email</Text>
-              <TextInput style={styles.input} value={email} onChangeText={onEmail} placeholder="Email" placeholderTextColor={colors.sub} />
+              <Text style={styles.label}>Email *</Text>
+              <TextInput style={styles.input} value={email} onChangeText={onEmail} placeholder="Email" placeholderTextColor={colors.sub} keyboardType="email-address" autoCapitalize="none" />
             </View>
             <View style={styles.field}>
-              <Text style={styles.label}>Phone</Text>
-              <TextInput style={styles.input} value={phone} onChangeText={onPhone} placeholder="Phone" placeholderTextColor={colors.sub} />
+              <Text style={styles.label}>Phone *</Text>
+              <TextInput style={styles.input} value={phone} onChangeText={onPhone} placeholder="Phone" placeholderTextColor={colors.sub} keyboardType="phone-pad" />
             </View>
           </View>
+          <Text style={styles.requiredNote}>* required to issue the ticket</Text>
           <Btn solid full disabled={!canConfirm} loading={booking} onPress={onConfirm}>Confirm booking</Btn>
         </Pressable>
       </Pressable>
@@ -294,6 +321,7 @@ export default function BookFlightsScreen() {
   const [returnViewMonth, setReturnViewMonth] = useState<[number, number]>([defaultYear, defaultMonth]);
   const [givenName, setGivenName] = useState('');
   const [familyName, setFamilyName] = useState('');
+  const [gender, setGender] = useState<Gender | null>(null);
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [bornOn, setBornOn] = useState('');
@@ -348,6 +376,7 @@ export default function BookFlightsScreen() {
   const clearPassengerFields = () => {
     setGivenName('');
     setFamilyName('');
+    setGender(null);
     setEmail('');
     setPhone('');
     setBornOn('');
@@ -370,7 +399,8 @@ export default function BookFlightsScreen() {
         title: selectedOffer.title,
         meta: selectedOffer.meta,
         passenger_details: {
-          title: 'mr',
+          title: gender === 'f' ? 'ms' : 'mr',
+          gender: gender ?? undefined,
           given_name: givenName.trim(),
           family_name: familyName.trim(),
           born_on: bornOn.trim() || undefined,
@@ -485,11 +515,13 @@ export default function BookFlightsScreen() {
         booking={createBooking.isPending}
         givenName={givenName}
         familyName={familyName}
+        gender={gender}
         bornOn={bornOn}
         email={email}
         phone={phone}
         onGivenName={setGivenName}
         onFamilyName={setFamilyName}
+        onGender={setGender}
         onBornOn={setBornOn}
         onEmail={setEmail}
         onPhone={setPhone}
@@ -638,6 +670,7 @@ const styles = StyleSheet.create({
   modalHeaderText: { flex: 1, minWidth: 0 },
   modalTitle: { fontSize: fontSize.lg, color: colors.ink, fontWeight: '800' },
   modalSub: { fontSize: fontSize.sm, color: colors.sub, marginTop: 3 },
+  requiredNote: { fontSize: fontSize.xs, color: colors.sub },
   close: { fontSize: fontSize.lg, color: colors.sub, fontWeight: '700' },
   error: { fontSize: fontSize.sm, color: '#c0392b' },
   empty: { fontSize: fontSize.sm, color: colors.sub, textAlign: 'center', paddingVertical: spacing.xl },
