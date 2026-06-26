@@ -15,7 +15,8 @@ function prefixScore(value: string | null, q: string): number {
 export class SearchService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async users(viewerId: string | null, q: string, limit = 20): Promise<UserSearchResult[]> {
+  // viewerId is unused here but kept for signature parity with trips()/all().
+  async users(_viewerId: string | null, q: string, limit = 20): Promise<UserSearchResult[]> {
     const rows = await this.prisma.user.findMany({
       where: {
         OR: [
