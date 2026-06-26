@@ -26,6 +26,41 @@ import { extractFlightSummary, flightDepartsOutsideTripWindow, timeFromIso } fro
 // Internal estimate of provider/affiliate payout. This is not user-facing markup.
 const ESTIMATED_PROVIDER_COMMISSION_RATE = 0.08;
 
+// In-memory price calendar cache: key → { expires, prices }
+const priceCalendarCache = new Map<string, { expires: number; prices: Record<string, number> }>();
+// One real cheapest-fare "anchor" per route, reused to estimate every month.
+const flightAnchorCache = new Map<string, { expires: number; price: number }>();
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min
+
+// Day-of-week price multipliers (Sun..Sat): weekends/Fri pricier, mid-week cheaper.
+const DOW_FACTOR = [1.18, 1.0, 0.9, 0.88, 0.97, 1.15, 1.08];
+// Seasonal multipliers per month (Jan..Dec): summer + year-end holidays peak.
+const SEASON_FACTOR = [1.05, 0.92, 0.95, 1.05, 0.95, 1.0, 1.15, 1.15, 0.98, 0.97, 1.0, 1.2];
+
+/** Deterministic 0..99 hash from a date string, for stable per-day jitter. */
+function dayHash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 100;
+  return h;
+}
+
+/** Build a full month of estimated lowest fares from a single anchor price. */
+function estimateMonthPrices(anchor: number, year: number, month: number): Record<string, number> {
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const prices: Record<string, number> = {};
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, month - 1, d);
+    const dowFactor = DOW_FACTOR[date.getDay()];
+    const seasonFactor = SEASON_FACTOR[month - 1];
+    const mm = String(month).padStart(2, '0');
+    const dd = String(d).padStart(2, '0');
+    const key = `${year}-${mm}-${dd}`;
+    const jitter = 0.95 + dayHash(key) / 1000; // 0.95 .. 1.049
+    prices[key] = Math.round((anchor * dowFactor * seasonFactor * jitter) / 10) * 10;
+  }
+  return prices;
+}
+
 @Injectable()
 export class BookingsService {
   constructor(
@@ -42,6 +77,7 @@ export class BookingsService {
         origin: dto.origin,
         destination: dto.destination,
         depart_date: dto.depart_date,
+        return_date: dto.return_date,
       });
     }
     return this.hotelProvider.searchHotels({ city: dto.city, check_in: dto.check_in, nights: dto.nights });
@@ -137,6 +173,42 @@ export class BookingsService {
     });
 
     return toBookingRow(booking);
+  }
+
+  /** A single real cheapest-fare lookup per route, cached 30 min. Used as the
+   *  anchor for the estimated price calendar so we don't hammer the provider. */
+  private async flightAnchorPrice(origin: string, destination: string): Promise<number | null> {
+    const key = `${origin}-${destination}`;
+    const cached = flightAnchorCache.get(key);
+    if (cached && cached.expires > Date.now()) return cached.price;
+
+    const refDate = new Date(Date.now() + 21 * 864e5).toISOString().slice(0, 10);
+    try {
+      const offers = await this.flightProvider.searchFlights({ origin, destination, depart_date: refDate });
+      if (offers.length === 0) return null;
+      const price = Math.min(...offers.map((o) => o.amount_thb));
+      flightAnchorCache.set(key, { expires: Date.now() + CACHE_TTL_MS, price });
+      return price;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Estimated cheapest fare per day for the given month. Duffel has no fare-
+   *  calendar API, so we take ONE real cheapest fare as an anchor and model
+   *  per-day variation (day-of-week + season). Estimates, not live quotes.
+   *  Cached in-memory for 30 minutes per route+month. */
+  async priceCalendar(origin: string, destination: string, year: number, month: number): Promise<Record<string, number>> {
+    const cacheKey = `${origin}-${destination}-${year}-${month}`;
+    const cached = priceCalendarCache.get(cacheKey);
+    if (cached && cached.expires > Date.now()) return cached.prices;
+
+    const anchor = await this.flightAnchorPrice(origin, destination);
+    if (anchor == null) return {};
+
+    const prices = estimateMonthPrices(anchor, year, month);
+    priceCalendarCache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, prices });
+    return prices;
   }
 
   /** The user's bookings (optionally for one trip). */

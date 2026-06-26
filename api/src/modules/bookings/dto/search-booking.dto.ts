@@ -23,6 +23,10 @@ export class SearchBookingDto {
 
   @IsOptional()
   @IsString()
+  return_date?: string;
+
+  @IsOptional()
+  @IsString()
   city?: string;
 
   @IsOptional()

@@ -60,12 +60,18 @@ export class DuffelFlightProvider implements FlightProviderApi {
     const destination = p.destination ?? 'NRT';
     const departureDate = p.depart_date ?? new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10);
 
+    // Round trip: add the return leg as a second slice when a return date is given.
+    const slices = [{ origin, destination, departure_date: departureDate }];
+    if (p.return_date) {
+      slices.push({ origin: destination, destination: origin, departure_date: p.return_date });
+    }
+
     const requestRes = await fetch(`${this.base}/air/offer_requests`, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({
         data: {
-          slices: [{ origin, destination, departure_date: departureDate }],
+          slices,
           passengers: [{ type: 'adult' }],
           cabin_class: 'economy',
         },

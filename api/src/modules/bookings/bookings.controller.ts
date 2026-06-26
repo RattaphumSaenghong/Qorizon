@@ -1,6 +1,7 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import type { BookingDetailRow, BookingOffer, BookingRow } from '@trailr/shared';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { BookingsService } from './bookings.service';
 import { SearchBookingDto } from './dto/search-booking.dto';
 import { CreateBookingDto } from './dto/create-booking.dto';
@@ -10,9 +11,21 @@ export class BookingsController {
   constructor(private readonly bookings: BookingsService) {}
 
   @Post('search')
+  @Public()
   @HttpCode(200)
   search(@Body() dto: SearchBookingDto): Promise<BookingOffer[]> {
     return this.bookings.search(dto);
+  }
+
+  @Get('price-calendar')
+  @Public()
+  priceCalendar(
+    @Query('origin') origin: string,
+    @Query('destination') destination: string,
+    @Query('year', ParseIntPipe) year: number,
+    @Query('month', ParseIntPipe) month: number,
+  ): Promise<Record<string, number>> {
+    return this.bookings.priceCalendar(origin, destination, year, month);
   }
 
   @Post()

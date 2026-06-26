@@ -35,3 +35,15 @@ export async function confirmBooking(id: string): Promise<BookingRow> {
 export async function cancelBooking(id: string): Promise<BookingRow> {
   return request<BookingRow>('POST', `/bookings/${id}/cancel`);
 }
+
+export async function fetchPriceCalendar(
+  origin: string,
+  destination: string,
+  year: number,
+  month: number,
+): Promise<Record<string, number>> {
+  return request<Record<string, number>>(
+    'GET',
+    `/bookings/price-calendar?origin=${origin}&destination=${destination}&year=${year}&month=${month}`,
+  );
+}

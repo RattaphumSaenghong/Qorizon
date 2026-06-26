@@ -54,6 +54,7 @@ export interface SearchBookingRequest {
   origin?: string;
   destination?: string;
   depart_date?: string;
+  return_date?: string;
   // hotel
   city?: string;
   check_in?: string;

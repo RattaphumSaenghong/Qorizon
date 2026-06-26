@@ -12,6 +12,7 @@ export interface FlightSearch {
   origin?: string;
   destination?: string;
   depart_date?: string;
+  return_date?: string;
 }
 export interface HotelSearch {
   city?: string;

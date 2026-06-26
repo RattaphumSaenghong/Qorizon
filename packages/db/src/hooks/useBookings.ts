@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   searchOffers,
   createBooking,
@@ -6,6 +6,7 @@ import {
   fetchBookings,
   confirmBooking,
   cancelBooking,
+  fetchPriceCalendar,
 } from '../queries/bookings';
 import type { CreateBookingRequest, SearchBookingRequest } from '../types';
 
@@ -13,6 +14,8 @@ export const bookingKeys = {
   list: (tripId?: string) => ['bookings', tripId ?? 'all'] as const,
   detail: (id: string) => ['bookings', 'detail', id] as const,
   search: (params: SearchBookingRequest) => ['bookings', 'search', params] as const,
+  priceCalendar: (origin: string, destination: string, year: number, month: number) =>
+    ['bookings', 'price-calendar', origin, destination, year, month] as const,
 };
 
 /** Search live offers (flights or hotels). */
@@ -64,6 +67,24 @@ export function useConfirmBooking(tripId?: string) {
       queryClient.invalidateQueries({ queryKey: bookingKeys.list(tripId) });
       queryClient.invalidateQueries({ queryKey: bookingKeys.detail(row.id) });
     },
+  });
+}
+
+/** Price calendar: cheapest fare per day for origin→destination in a given month.
+ *  Only fetches when both airports are set and enabled=true. */
+export function useFlightPriceCalendar(
+  origin: string,
+  destination: string,
+  year: number,
+  month: number,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: bookingKeys.priceCalendar(origin, destination, year, month),
+    queryFn: () => fetchPriceCalendar(origin, destination, year, month),
+    enabled: enabled && origin.length === 3 && destination.length === 3,
+    staleTime: 1000 * 60 * 30,
+    placeholderData: keepPreviousData,
   });
 }
 
