@@ -1,17 +1,26 @@
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { AirportInput } from '../../src/components/AirportInput';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ApiError, useCreateBooking, useFlightPriceCalendar, useOfferSearch } from '@trailr/db';
-import type { BookingOffer, SearchBookingRequest } from '@trailr/db';
+import type { BookingOffer, FlightSummary, SearchBookingRequest } from '@trailr/db';
+import { AirportInput } from '../../src/components/AirportInput';
 import { Btn } from '../../src/components/Btn';
 import { DatePicker } from '../../src/components/DatePicker';
 import { PressableScale } from '../../src/components/PressableScale';
-import { TopBar } from '../../src/components/TopBar';
-import { useAuthStore } from '../../src/stores/authStore';
 import { useToast } from '../../src/components/Toast';
-import { flightRowLine } from '../../src/lib/bookingDisplay';
+import { TopBar } from '../../src/components/TopBar';
+import {
+  arrWithDayMarker,
+  flightDurationMinutes,
+  flightSummariesFromMeta,
+  formatDuration,
+  timeFromIso,
+} from '../../src/lib/bookingDisplay';
+import { useAuthStore } from '../../src/stores/authStore';
 import { colors, fontSize, radius, shadow, spacing } from '../../src/theme/tokens';
+
+type TripType = 'one-way' | 'round-trip';
+type FlightSort = 'cheapest' | 'fastest' | 'best';
 
 function todayPlus(days: number): string {
   const date = new Date();
@@ -28,6 +37,52 @@ function prettyDate(ymd: string): string {
   const d = new Date(ymd + 'T00:00:00');
   if (Number.isNaN(d.getTime())) return ymd;
   return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function stopLabel(stops: number): string {
+  return stops === 0 ? 'non-stop' : `${stops} stop${stops === 1 ? '' : 's'}`;
+}
+
+function airline(summary: FlightSummary | null, offer: BookingOffer): string {
+  return summary?.carrier_name ?? summary?.carrier ?? offer.subtitle.split(' - ')[0] ?? 'Flight';
+}
+
+function routeSummary(offer: BookingOffer): string {
+  const legs = flightSummariesFromMeta(offer.meta);
+  const first = legs[0];
+  const last = legs[legs.length - 1];
+  if (!first) return `${offer.title} - ${money(offer.amount_thb)}`;
+  const route = legs.length > 1
+    ? `${first.origin} -> ${first.destination} return ${last.origin} -> ${last.destination}`
+    : `${first.origin} -> ${first.destination}`;
+  return `${airline(first, offer)} - ${route} - ${money(offer.amount_thb)}`;
+}
+
+function sortOffers(offers: BookingOffer[], sort: FlightSort): BookingOffer[] {
+  const decorated = offers.map((offer) => ({
+    offer,
+    price: offer.amount_thb,
+    duration: flightDurationMinutes(offer.meta),
+  }));
+
+  if (sort === 'cheapest') return decorated.sort((a, b) => a.price - b.price).map((x) => x.offer);
+  if (sort === 'fastest') return decorated.sort((a, b) => a.duration - b.duration).map((x) => x.offer);
+
+  const prices = decorated.map((x) => x.price);
+  const durations = decorated.map((x) => x.duration).filter(Number.isFinite);
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const minDur = durations.length > 0 ? Math.min(...durations) : 0;
+  const maxDur = durations.length > 0 ? Math.max(...durations) : 1;
+  return decorated
+    .sort((a, b) => {
+      const aDur = Number.isFinite(a.duration) ? a.duration : maxDur;
+      const bDur = Number.isFinite(b.duration) ? b.duration : maxDur;
+      const aScore = 0.5 * ((a.price - minPrice) / (maxPrice - minPrice || 1)) + 0.5 * ((aDur - minDur) / (maxDur - minDur || 1));
+      const bScore = 0.5 * ((b.price - minPrice) / (maxPrice - minPrice || 1)) + 0.5 * ((bDur - minDur) / (maxDur - minDur || 1));
+      return aScore - bScore;
+    })
+    .map((x) => x.offer);
 }
 
 function DateField({
@@ -50,11 +105,11 @@ function DateField({
         <Text style={value ? styles.inputText : styles.placeholder}>{value ? prettyDate(value) : placeholder ?? 'Select date'}</Text>
       </PressableScale>
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.dateBackdrop} onPress={() => setOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setOpen(false)}>
           <Pressable style={styles.dateSheet} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.dateHeader}>
-              <Text style={styles.dateTitle}>{label}</Text>
-              <Pressable hitSlop={8} onPress={() => setOpen(false)}><Text style={styles.dateClose}>✕</Text></Pressable>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{label}</Text>
+              <Pressable hitSlop={8} onPress={() => setOpen(false)}><Text style={styles.close}>x</Text></Pressable>
             </View>
             <DatePicker
               value={value || null}
@@ -71,16 +126,151 @@ function DateField({
   );
 }
 
-function FlightOfferCard({ offer, booking, onBook }: { offer: BookingOffer; booking: boolean; onBook: () => void }) {
+function SortTab({ value, active, onPress }: { value: FlightSort; active: boolean; onPress: () => void }) {
+  const label = value[0].toUpperCase() + value.slice(1);
   return (
-    <View style={styles.offerCard}>
-      <View style={styles.offerMain}>
-        <Text style={styles.offerTitle}>{offer.title}</Text>
-        <Text style={styles.offerSub}>{(offer.type === 'flight' ? flightRowLine(offer.meta) : null) ?? offer.subtitle}</Text>
+    <Pressable style={[styles.pill, active && styles.pillActive]} onPress={onPress}>
+      <Text style={[styles.pillText, active && styles.pillTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function FlightLegRow({ leg, label }: { leg: FlightSummary; label?: string }) {
+  const dep = timeFromIso(leg.dep_at) ?? '--:--';
+  const arr = timeFromIso(leg.arr_at);
+  const arrLabel = arr ? arrWithDayMarker(arr, leg.dep_at, leg.arr_at).trim() : '--:--';
+  const duration = formatDuration(leg.duration) ?? 'Duration pending';
+
+  return (
+    <View style={styles.legRow}>
+      {label ? <Text style={styles.legLabel}>{label}</Text> : null}
+      <View style={styles.timeBlock}>
+        <Text style={styles.timeText}>{dep}</Text>
+        <Text style={styles.codeText}>{leg.origin || 'From'}</Text>
       </View>
-      <Text style={styles.price}>{money(offer.amount_thb)}</Text>
-      <Btn solid sm onPress={onBook} loading={booking}>Book</Btn>
+      <View style={styles.flightMiddle}>
+        <Text style={styles.durationText}>{duration}</Text>
+        <View style={styles.connector} />
+        <Text style={styles.stopText}>{stopLabel(leg.stops)}</Text>
+      </View>
+      <View style={styles.timeBlockRight}>
+        <Text style={styles.timeText}>{arrLabel}</Text>
+        <Text style={styles.codeText}>{leg.destination || 'To'}</Text>
+      </View>
     </View>
+  );
+}
+
+function FlightResultCard({
+  offer,
+  booking,
+  onSelect,
+}: {
+  offer: BookingOffer;
+  booking: boolean;
+  onSelect: () => void;
+}) {
+  const legs = flightSummariesFromMeta(offer.meta);
+  const first = legs[0] ?? null;
+
+  return (
+    <View style={styles.resultCard}>
+      <View style={styles.resultMain}>
+        <View style={styles.resultTop}>
+          <Text style={styles.airline} numberOfLines={1}>{airline(first, offer)}</Text>
+          {legs.length > 1 ? <Text style={styles.roundTrip}>Round trip</Text> : null}
+        </View>
+        {legs.length > 0 ? (
+          legs.map((leg, index) => (
+            <FlightLegRow
+              key={`${leg.origin}-${leg.destination}-${leg.dep_at ?? index}`}
+              leg={leg}
+              label={legs.length > 1 ? (index === 0 ? 'Outbound' : 'Return') : undefined}
+            />
+          ))
+        ) : (
+          <Text style={styles.fallbackText}>{offer.subtitle}</Text>
+        )}
+      </View>
+      <View style={styles.priceRail}>
+        <Text style={styles.price}>{money(offer.amount_thb)}</Text>
+        <Btn solid sm onPress={onSelect} loading={booking}>Select</Btn>
+      </View>
+    </View>
+  );
+}
+
+function PassengerModal({
+  offer,
+  visible,
+  booking,
+  givenName,
+  familyName,
+  bornOn,
+  email,
+  phone,
+  onGivenName,
+  onFamilyName,
+  onBornOn,
+  onEmail,
+  onPhone,
+  onClose,
+  onConfirm,
+}: {
+  offer: BookingOffer | null;
+  visible: boolean;
+  booking: boolean;
+  givenName: string;
+  familyName: string;
+  bornOn: string;
+  email: string;
+  phone: string;
+  onGivenName: (value: string) => void;
+  onFamilyName: (value: string) => void;
+  onBornOn: (value: string) => void;
+  onEmail: (value: string) => void;
+  onPhone: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const canConfirm = givenName.trim().length > 0 && familyName.trim().length > 0;
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Pressable style={styles.passengerSheet} onPress={(e) => e.stopPropagation()}>
+          <View style={styles.modalHeader}>
+            <View style={styles.modalHeaderText}>
+              <Text style={styles.modalTitle}>Passenger details</Text>
+              {offer ? <Text style={styles.modalSub} numberOfLines={2}>{routeSummary(offer)}</Text> : null}
+            </View>
+            <Pressable hitSlop={8} onPress={onClose}><Text style={styles.close}>x</Text></Pressable>
+          </View>
+          <View style={styles.row}>
+            <View style={styles.field}>
+              <Text style={styles.label}>First name</Text>
+              <TextInput style={styles.input} value={givenName} onChangeText={onGivenName} placeholder="First name" placeholderTextColor={colors.sub} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Last name</Text>
+              <TextInput style={styles.input} value={familyName} onChangeText={onFamilyName} placeholder="Last name" placeholderTextColor={colors.sub} />
+            </View>
+          </View>
+          <DateField label="Date of birth" value={bornOn} onChange={onBornOn} initialYear={1990} placeholder="Select date of birth" />
+          <View style={styles.row}>
+            <View style={styles.field}>
+              <Text style={styles.label}>Email</Text>
+              <TextInput style={styles.input} value={email} onChangeText={onEmail} placeholder="Email" placeholderTextColor={colors.sub} />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.label}>Phone</Text>
+              <TextInput style={styles.input} value={phone} onChangeText={onPhone} placeholder="Phone" placeholderTextColor={colors.sub} />
+            </View>
+          </View>
+          <Btn solid full disabled={!canConfirm} loading={booking} onPress={onConfirm}>Confirm booking</Btn>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -94,22 +284,22 @@ export default function BookFlightsScreen() {
   const [destination, setDestination] = useState('KIX');
   const [departDate, setDepartDate] = useState(todayPlus(14));
   const [returnDate, setReturnDate] = useState('');
-  const [tripType, setTripType] = useState<'one-way' | 'round-trip'>('one-way');
+  const [tripType, setTripType] = useState<TripType>('one-way');
   const [submitted, setSubmitted] = useState<SearchBookingRequest | null>(null);
-
-  // Track which month the user is viewing in each picker so we fetch the right month
+  const [sort, setSort] = useState<FlightSort>('best');
+  const [selectedOffer, setSelectedOffer] = useState<BookingOffer | null>(null);
   const defaultYear = new Date(departDate).getFullYear();
   const defaultMonth = new Date(departDate).getMonth() + 1;
   const [departViewMonth, setDepartViewMonth] = useState<[number, number]>([defaultYear, defaultMonth]);
   const [returnViewMonth, setReturnViewMonth] = useState<[number, number]>([defaultYear, defaultMonth]);
-
-  const departPricesQ = useFlightPriceCalendar(origin, destination, departViewMonth[0], departViewMonth[1], origin.length === 3 && destination.length === 3);
-  const returnPricesQ = useFlightPriceCalendar(destination, origin, returnViewMonth[0], returnViewMonth[1], tripType === 'round-trip' && origin.length === 3 && destination.length === 3);
   const [givenName, setGivenName] = useState('');
   const [familyName, setFamilyName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [bornOn, setBornOn] = useState('');
+
+  const departPricesQ = useFlightPriceCalendar(origin, destination, departViewMonth[0], departViewMonth[1], origin.length === 3 && destination.length === 3);
+  const returnPricesQ = useFlightPriceCalendar(destination, origin, returnViewMonth[0], returnViewMonth[1], tripType === 'round-trip' && origin.length === 3 && destination.length === 3);
 
   const swap = () => {
     const prev = origin;
@@ -119,7 +309,6 @@ export default function BookFlightsScreen() {
 
   const handleDepartChange = (v: string) => {
     setDepartDate(v);
-    // If return is now before depart, push it forward by 7 days
     if (returnDate && v && returnDate <= v) {
       const d = new Date(v + 'T00:00:00');
       d.setDate(d.getDate() + 7);
@@ -127,9 +316,8 @@ export default function BookFlightsScreen() {
     }
   };
 
-  const handleTripTypeChange = (t: 'one-way' | 'round-trip') => {
+  const handleTripTypeChange = (t: TripType) => {
     setTripType(t);
-    // Pre-fill return date to depart + 7 when switching to round-trip with no return set
     if (t === 'round-trip' && !returnDate && departDate) {
       const d = new Date(departDate + 'T00:00:00');
       d.setDate(d.getDate() + 7);
@@ -146,6 +334,8 @@ export default function BookFlightsScreen() {
   }), [origin, destination, departDate, returnDate, tripType]);
   const offersQ = useOfferSearch(submitted ?? draft, submitted != null);
   const createBooking = useCreateBooking(tripId);
+  const offers = offersQ.data ?? [];
+  const sortedOffers = useMemo(() => sortOffers(offers, sort), [offers, sort]);
 
   const goTab = (tab: string) => {
     if (tab === 'Feed') router.push('/(tabs)/');
@@ -155,38 +345,49 @@ export default function BookFlightsScreen() {
     if (tab === 'Book') router.push('/(tabs)/book');
   };
 
-  const book = (offer: BookingOffer) => {
-    if (!user) { router.push('/sign-in'); return; }
+  const clearPassengerFields = () => {
+    setGivenName('');
+    setFamilyName('');
+    setEmail('');
+    setPhone('');
+    setBornOn('');
+  };
+
+  const bookSelected = () => {
+    if (!selectedOffer) return;
+    if (!user) {
+      setSelectedOffer(null);
+      router.push('/sign-in');
+      return;
+    }
     createBooking.mutate(
       {
         type: 'flight',
-        provider: offer.provider,
+        provider: selectedOffer.provider,
         trip_id: tripId,
-        external_ref: offer.id,
-        amount_thb: offer.amount_thb,
-        title: offer.title,
-        meta: offer.meta,
-        ...(givenName.trim() && familyName.trim()
-          ? {
-              passenger_details: {
-                title: 'mr',
-                given_name: givenName.trim(),
-                family_name: familyName.trim(),
-                born_on: bornOn.trim() || undefined,
-                email: email.trim() || undefined,
-                phone_number: phone.trim() || undefined,
-              },
-            }
-          : {}),
+        external_ref: selectedOffer.id,
+        amount_thb: selectedOffer.amount_thb,
+        title: selectedOffer.title,
+        meta: selectedOffer.meta,
+        passenger_details: {
+          title: 'mr',
+          given_name: givenName.trim(),
+          family_name: familyName.trim(),
+          born_on: bornOn.trim() || undefined,
+          email: email.trim() || undefined,
+          phone_number: phone.trim() || undefined,
+        },
       },
       {
-        onSuccess: () => toast(tripId ? 'Flight added to trip' : 'Flight booked'),
+        onSuccess: () => {
+          toast(tripId ? 'Flight added to trip' : 'Flight booked');
+          setSelectedOffer(null);
+          clearPassengerFields();
+        },
         onError: (e) => toast(e instanceof ApiError ? e.message : 'Could not book flight'),
       },
     );
   };
-
-  const offers = offersQ.data ?? [];
 
   return (
     <View style={styles.root}>
@@ -201,63 +402,64 @@ export default function BookFlightsScreen() {
             <Btn sm onPress={() => router.push(tripId ? `/book/stays?tripId=${tripId}` : '/book/stays')}>Stays</Btn>
           </View>
 
-          <View style={styles.tripTypeRow}>
-            <Pressable
-              style={[styles.tripTypeBtn, tripType === 'one-way' && styles.tripTypeBtnActive]}
-              onPress={() => handleTripTypeChange('one-way')}
-            >
-              <Text style={[styles.tripTypeTxt, tripType === 'one-way' && styles.tripTypeTxtActive]}>One way</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.tripTypeBtn, tripType === 'round-trip' && styles.tripTypeBtnActive]}
-              onPress={() => handleTripTypeChange('round-trip')}
-            >
-              <Text style={[styles.tripTypeTxt, tripType === 'round-trip' && styles.tripTypeTxtActive]}>Round trip</Text>
-            </Pressable>
-          </View>
+          <View style={styles.searchCard}>
+            <View style={styles.tripTypeRow}>
+              <Pressable
+                style={[styles.pill, tripType === 'one-way' && styles.pillActive]}
+                onPress={() => handleTripTypeChange('one-way')}
+              >
+                <Text style={[styles.pillText, tripType === 'one-way' && styles.pillTextActive]}>One way</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.pill, tripType === 'round-trip' && styles.pillActive]}
+                onPress={() => handleTripTypeChange('round-trip')}
+              >
+                <Text style={[styles.pillText, tripType === 'round-trip' && styles.pillTextActive]}>Round trip</Text>
+              </Pressable>
+            </View>
 
-          <View style={styles.row}>
-            <AirportInput label="From" value={origin} onChange={setOrigin} />
-            <Pressable style={styles.swapBtn} onPress={swap}>
-              <Text style={styles.swapIcon}>⇄</Text>
-            </Pressable>
-            <AirportInput label="To" value={destination} onChange={setDestination} />
-            <DateField
-              label="Depart"
-              value={departDate}
-              onChange={handleDepartChange}
-              prices={departPricesQ.data}
-              onViewMonthChange={(y, m) => setDepartViewMonth([y, m])}
-            />
-            {tripType === 'round-trip' && (
+            <View style={styles.row}>
+              <AirportInput label="From" value={origin} onChange={setOrigin} />
+              <Pressable style={styles.swapBtn} onPress={swap}>
+                <Text style={styles.swapIcon}>Swap</Text>
+              </Pressable>
+              <AirportInput label="To" value={destination} onChange={setDestination} />
+            </View>
+
+            <View style={styles.row}>
               <DateField
-                label="Return"
-                value={returnDate}
-                onChange={setReturnDate}
-                placeholder="Select return date"
-                minDate={departDate || undefined}
-                prices={returnPricesQ.data}
-                onViewMonthChange={(y, m) => setReturnViewMonth([y, m])}
+                label="Depart"
+                value={departDate}
+                onChange={handleDepartChange}
+                prices={departPricesQ.data}
+                onViewMonthChange={(y, m) => setDepartViewMonth([y, m])}
               />
-            )}
+              {tripType === 'round-trip' && (
+                <DateField
+                  label="Return"
+                  value={returnDate}
+                  onChange={setReturnDate}
+                  placeholder="Select return date"
+                  minDate={departDate || undefined}
+                  prices={returnPricesQ.data}
+                  onViewMonthChange={(y, m) => setReturnViewMonth([y, m])}
+                />
+              )}
+            </View>
+
+            <Btn solid full onPress={() => setSubmitted(draft)} loading={offersQ.isFetching}>Search flights</Btn>
           </View>
 
-          <View style={styles.traveler}>
-            <Text style={styles.label}>Passenger details (optional)</Text>
-            <View style={styles.row}>
-              <TextInput style={[styles.input, styles.field]} value={givenName} onChangeText={setGivenName} placeholder="First name" placeholderTextColor={colors.sub} />
-              <TextInput style={[styles.input, styles.field]} value={familyName} onChangeText={setFamilyName} placeholder="Last name" placeholderTextColor={colors.sub} />
+          {offers.length >= 2 ? (
+            <View style={styles.resultsHeader}>
+              <Text style={styles.resultCount}>{offers.length} results</Text>
+              <View style={styles.sortTabs}>
+                <SortTab value="cheapest" active={sort === 'cheapest'} onPress={() => setSort('cheapest')} />
+                <SortTab value="fastest" active={sort === 'fastest'} onPress={() => setSort('fastest')} />
+                <SortTab value="best" active={sort === 'best'} onPress={() => setSort('best')} />
+              </View>
             </View>
-            <View style={styles.row}>
-              <DateField label="Date of birth" value={bornOn} onChange={setBornOn} initialYear={1990} placeholder="Select date of birth" />
-              <TextInput style={[styles.input, styles.field]} value={email} onChangeText={setEmail} placeholder="Email" placeholderTextColor={colors.sub} />
-              <TextInput style={[styles.input, styles.field]} value={phone} onChangeText={setPhone} placeholder="Phone" placeholderTextColor={colors.sub} />
-            </View>
-          </View>
-
-          <View style={styles.actions}>
-            <Btn solid onPress={() => setSubmitted(draft)} loading={offersQ.isFetching}>Search flights</Btn>
-          </View>
+          ) : null}
 
           {offersQ.isError ? <Text style={styles.error}>Could not search flights.</Text> : null}
           {offersQ.isFetching && offers.length === 0 ? (
@@ -265,12 +467,35 @@ export default function BookFlightsScreen() {
           ) : submitted && offers.length === 0 ? (
             <Text style={styles.empty}>No fares found. Try another route or date.</Text>
           ) : (
-            offers.map((offer) => (
-              <FlightOfferCard key={offer.id} offer={offer} booking={createBooking.isPending} onBook={() => book(offer)} />
+            sortedOffers.map((offer) => (
+              <FlightResultCard
+                key={offer.id}
+                offer={offer}
+                booking={createBooking.isPending && selectedOffer?.id === offer.id}
+                onSelect={() => setSelectedOffer(offer)}
+              />
             ))
           )}
         </View>
       </ScrollView>
+
+      <PassengerModal
+        offer={selectedOffer}
+        visible={selectedOffer != null}
+        booking={createBooking.isPending}
+        givenName={givenName}
+        familyName={familyName}
+        bornOn={bornOn}
+        email={email}
+        phone={phone}
+        onGivenName={setGivenName}
+        onFamilyName={setFamilyName}
+        onBornOn={setBornOn}
+        onEmail={setEmail}
+        onPhone={setPhone}
+        onClose={() => setSelectedOffer(null)}
+        onConfirm={bookSelected}
+      />
     </View>
   );
 }
@@ -278,10 +503,19 @@ export default function BookFlightsScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.paper },
   body: { padding: spacing.xxl, alignItems: 'center' },
-  panel: { width: '100%', maxWidth: 860, gap: spacing.md },
+  panel: { width: '100%', maxWidth: 920, gap: spacing.md },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
   heading: { fontSize: fontSize.xl, color: colors.ink, fontWeight: '800' },
   sub: { fontSize: fontSize.sm, color: colors.sub, marginTop: 3 },
+  searchCard: {
+    backgroundColor: colors.paper,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    gap: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    ...shadow.sm,
+  },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   field: { flex: 1, minWidth: 160, gap: spacing.xs },
   label: { fontSize: fontSize.xs, color: colors.sub, fontWeight: '800', textTransform: 'uppercase' },
@@ -300,7 +534,82 @@ const styles = StyleSheet.create({
   } as object,
   inputText: { fontSize: fontSize.md, color: colors.ink },
   placeholder: { fontSize: fontSize.md, color: colors.sub },
-  dateBackdrop: {
+  tripTypeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  pill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.panel,
+  },
+  pillActive: {
+    backgroundColor: colors.ink,
+    borderColor: colors.ink,
+  },
+  pillText: { fontSize: fontSize.sm, color: colors.sub, fontWeight: '700' },
+  pillTextActive: { color: colors.paper },
+  swapBtn: {
+    alignSelf: 'flex-end',
+    marginBottom: 1,
+    minWidth: 54,
+    height: 42,
+    paddingHorizontal: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.panel,
+  },
+  swapIcon: { fontSize: fontSize.xs, color: colors.acc, fontWeight: '800', textTransform: 'uppercase' },
+  resultsHeader: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  resultCount: { fontSize: fontSize.sm, color: colors.sub, fontWeight: '800' },
+  sortTabs: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  resultCard: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'stretch',
+    gap: spacing.lg,
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.paper,
+    ...shadow.sm,
+  },
+  resultMain: { flex: 1, minWidth: 280, gap: spacing.sm },
+  resultTop: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  airline: { flex: 1, minWidth: 180, fontSize: fontSize.base, color: colors.ink, fontWeight: '800' },
+  roundTrip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accSoft,
+    color: colors.acc,
+    fontSize: fontSize.xs,
+    fontWeight: '800',
+  },
+  legRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  legLabel: { width: 64, fontSize: fontSize.xs, color: colors.sub, fontWeight: '800', textTransform: 'uppercase' },
+  timeBlock: { width: 58 },
+  timeBlockRight: { width: 72, alignItems: 'flex-end' },
+  timeText: { fontSize: fontSize.lg, color: colors.ink, fontWeight: '800' },
+  codeText: { fontSize: fontSize.xs, color: colors.sub, fontWeight: '800' },
+  flightMiddle: { flex: 1, minWidth: 96, alignItems: 'center', gap: 4 },
+  durationText: { fontSize: fontSize.xs, color: colors.sub, fontWeight: '700' },
+  connector: { height: 1, alignSelf: 'stretch', backgroundColor: colors.line },
+  stopText: { fontSize: fontSize.xs, color: colors.sub },
+  fallbackText: { fontSize: fontSize.sm, color: colors.sub },
+  priceRail: { minWidth: 132, alignItems: 'flex-end', justifyContent: 'space-between', gap: spacing.md },
+  price: { fontSize: fontSize.lg, color: colors.ink, fontWeight: '800', textAlign: 'right' },
+  modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(44,42,38,0.45)',
     alignItems: 'center',
@@ -316,54 +625,20 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     ...shadow.md,
   },
-  dateHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  dateTitle: { fontSize: fontSize.lg, color: colors.ink, fontWeight: '800' },
-  dateClose: { fontSize: fontSize.lg, color: colors.sub, fontWeight: '700' },
-  tripTypeRow: { flexDirection: 'row', gap: spacing.xs },
-  tripTypeBtn: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.panel,
-  },
-  tripTypeBtnActive: {
-    backgroundColor: colors.ink,
-    borderColor: colors.ink,
-  },
-  tripTypeTxt: { fontSize: fontSize.sm, color: colors.sub, fontWeight: '700' },
-  tripTypeTxtActive: { color: colors.paper },
-  swapBtn: {
-    alignSelf: 'flex-end',
-    marginBottom: 1,
-    width: 36,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.panel,
-  },
-  swapIcon: { fontSize: 18, color: colors.acc },
-  traveler: { gap: spacing.sm },
-  actions: { flexDirection: 'row', justifyContent: 'flex-start' },
-  offerCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.line,
+  passengerSheet: {
+    width: '100%',
+    maxWidth: 460,
     backgroundColor: colors.paper,
-    ...shadow.sm,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    gap: spacing.md,
+    ...shadow.md,
   },
-  offerMain: { flex: 1, minWidth: 0, gap: 3 },
-  offerTitle: { fontSize: fontSize.base, color: colors.ink, fontWeight: '800' },
-  offerSub: { fontSize: fontSize.sm, color: colors.sub },
-  price: { fontSize: fontSize.md, color: colors.ink, fontWeight: '800' },
+  modalHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.md },
+  modalHeaderText: { flex: 1, minWidth: 0 },
+  modalTitle: { fontSize: fontSize.lg, color: colors.ink, fontWeight: '800' },
+  modalSub: { fontSize: fontSize.sm, color: colors.sub, marginTop: 3 },
+  close: { fontSize: fontSize.lg, color: colors.sub, fontWeight: '700' },
   error: { fontSize: fontSize.sm, color: '#c0392b' },
   empty: { fontSize: fontSize.sm, color: colors.sub, textAlign: 'center', paddingVertical: spacing.xl },
 });

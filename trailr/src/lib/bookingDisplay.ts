@@ -32,24 +32,32 @@ function segmentRecords(meta: Record<string, unknown>): Array<Record<string, unk
   return Array.isArray(meta.segments) ? meta.segments.map(asRecord).filter((s): s is Record<string, unknown> => s !== null) : [];
 }
 
+function sliceRecords(meta: Record<string, unknown>): Array<Record<string, unknown>> {
+  return Array.isArray(meta.slices) ? meta.slices.map(asRecord).filter((s): s is Record<string, unknown> => s !== null) : [];
+}
+
 export function formatDuration(value?: unknown): string | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return durationFromMinutes(Math.round(value));
-  }
+  if (typeof value === 'number' && Number.isFinite(value)) return durationFromMinutes(Math.round(value));
+  const minutes = durationMinutes(value);
+  if (minutes != null) return durationFromMinutes(minutes);
+  if (typeof value !== 'string' || !value.trim()) return null;
+  return value;
+}
+
+function durationMinutes(value?: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return Math.round(value);
   if (typeof value !== 'string' || !value.trim()) return null;
   const iso = value.match(/^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?$/i);
   if (iso && (iso[1] || iso[2] || iso[3])) {
     const days = Number(iso[1] ?? 0);
     const hours = Number(iso[2] ?? 0);
     const minutes = Number(iso[3] ?? 0);
-    return durationFromMinutes((days * 24 + hours) * 60 + minutes);
+    return (days * 24 + hours) * 60 + minutes;
   }
-  return value;
+  return null;
 }
 
-export function flightSummaryFromMeta(meta?: Record<string, unknown> | FlightSummary | null): FlightSummary | null {
-  if (!meta) return null;
-  const record = meta as Record<string, unknown>;
+function flightSummaryFromRecord(record: Record<string, unknown>): FlightSummary | null {
   const records = segmentRecords(record);
   const first = records[0];
   const last = records[records.length - 1];
@@ -66,6 +74,29 @@ export function flightSummaryFromMeta(meta?: Record<string, unknown> | FlightSum
 
   if (!origin && !destination && !depAt && !arrAt) return null;
   return { origin, destination, dep_at: depAt, arr_at: arrAt, carrier, carrier_name: carrierName, flight_number: flightNumber, stops, duration };
+}
+
+export function flightSummaryFromMeta(meta?: Record<string, unknown> | FlightSummary | null): FlightSummary | null {
+  if (!meta) return null;
+  return flightSummaryFromRecord(meta as Record<string, unknown>);
+}
+
+export function flightSummariesFromMeta(meta?: Record<string, unknown> | FlightSummary | null): FlightSummary[] {
+  if (!meta) return [];
+  const record = meta as Record<string, unknown>;
+  const slices = sliceRecords(record).map(flightSummaryFromRecord).filter((s): s is FlightSummary => s !== null);
+  if (slices.length > 0) return slices;
+  const summary = flightSummaryFromRecord(record);
+  return summary ? [summary] : [];
+}
+
+export function flightDurationMinutes(meta?: Record<string, unknown> | FlightSummary | null): number {
+  const summaries = flightSummariesFromMeta(meta);
+  const total = summaries.reduce((sum, summary) => {
+    const minutes = durationMinutes(summary.duration) ?? minutesBetween(summary.dep_at, summary.arr_at);
+    return Number.isFinite(minutes) && minutes != null ? sum + minutes : sum;
+  }, 0);
+  return total > 0 ? total : Number.POSITIVE_INFINITY;
 }
 
 export function flightSegmentsFromMeta(meta?: Record<string, unknown> | null): FlightSegment[] {
@@ -116,13 +147,13 @@ export function dayOffset(start?: string | null, end?: string | null): number {
 }
 
 /** Arrival time label with a "+N" next-day marker (e.g. " 06:00+1") for overnight flights. */
-function arrWithDayMarker(arr: string | null, depAt?: string | null, arrAt?: string | null): string {
+export function arrWithDayMarker(arr: string | null, depAt?: string | null, arrAt?: string | null): string {
   if (!arr) return '';
   const offset = dayOffset(depAt, arrAt);
   return ` ${arr}${offset > 0 ? `+${offset}` : ''}`;
 }
 
-function timeFromIso(value?: string | null): string | null {
+export function timeFromIso(value?: string | null): string | null {
   if (!value) return null;
   const match = value.match(/(?:T|\s)(\d{2}:\d{2})/) ?? value.match(/^(\d{2}:\d{2})/);
   return match?.[1] ?? null;
@@ -135,6 +166,15 @@ function durationBetween(start?: string | null, end?: string | null): string | n
   const diff = endDate.getTime() - startDate.getTime();
   if (!Number.isFinite(diff) || diff <= 0) return null;
   return durationFromMinutes(Math.round(diff / 60000));
+}
+
+function minutesBetween(start?: string | null, end?: string | null): number | null {
+  if (!start || !end) return null;
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  const diff = endDate.getTime() - startDate.getTime();
+  if (!Number.isFinite(diff) || diff <= 0) return null;
+  return Math.round(diff / 60000);
 }
 
 function durationFromMinutes(totalMinutes: number): string | null {

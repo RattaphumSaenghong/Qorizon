@@ -33,6 +33,49 @@ interface DuffelOffer {
   passengers?: Array<{ id?: string }>;
 }
 
+function mapSlice(
+  slice: NonNullable<DuffelOffer['slices']>[number] | undefined,
+  fallbackOrigin: string,
+  fallbackDestination: string,
+  fallbackCarrierName: string | null,
+) {
+  const segments = slice?.segments ?? [];
+  const firstSeg = segments[0];
+  const lastSeg = segments[segments.length - 1];
+  const originCode = firstSeg?.origin?.iata_code ?? slice?.origin?.iata_code ?? fallbackOrigin;
+  const destCode = lastSeg?.destination?.iata_code ?? slice?.destination?.iata_code ?? fallbackDestination;
+  const departingAt = firstSeg?.departing_at ?? null;
+  const arrivingAt = lastSeg?.arriving_at ?? null;
+  const carrier = firstSeg?.marketing_carrier?.iata_code ?? null;
+  const carrierName = firstSeg?.marketing_carrier?.name ?? fallbackCarrierName;
+  const flightNumber = firstSeg?.marketing_carrier_flight_number ?? null;
+  const stops = Math.max(0, segments.length - 1);
+  const itinerary = segments.map((s) => ({
+    origin: s.origin?.iata_code ?? null,
+    destination: s.destination?.iata_code ?? null,
+    departing_at: s.departing_at ?? null,
+    arriving_at: s.arriving_at ?? null,
+    carrier: s.marketing_carrier?.iata_code ?? null,
+    carrier_name: s.marketing_carrier?.name ?? null,
+    flight_number: s.marketing_carrier_flight_number ?? null,
+  }));
+
+  return {
+    origin: originCode,
+    destination: destCode,
+    dep_at: departingAt,
+    arr_at: arrivingAt,
+    carrier,
+    carrier_name: carrierName,
+    flight_number: flightNumber,
+    stops,
+    duration: slice?.duration ?? null,
+    departing_at: departingAt,
+    arriving_at: arrivingAt,
+    segments: itinerary,
+  };
+}
+
 export class DuffelFlightProvider implements FlightProviderApi {
   readonly name = 'duffel';
   private readonly base = 'https://api.duffel.com';
@@ -90,6 +133,15 @@ export class DuffelFlightProvider implements FlightProviderApi {
 
     const usdThb = await this.fx.usdToThb();
     return (offersData.data ?? []).map((offer) => {
+      const mappedSlices = (offer.slices ?? []).map((slice, index) =>
+        mapSlice(
+          slice,
+          index === 0 ? origin : destination,
+          index === 0 ? destination : origin,
+          offer.owner?.name ?? null,
+        ),
+      );
+      const outbound = mappedSlices[0] ?? mapSlice(undefined, origin, destination, offer.owner?.name ?? null);
       const slice = offer.slices?.[0];
       const segments = slice?.segments ?? [];
       const firstSeg = segments[0];
@@ -116,7 +168,9 @@ export class DuffelFlightProvider implements FlightProviderApi {
       }));
       const passengerIds = [
         ...(offer.passengers ?? []).map((x) => x.id).filter(Boolean),
-        ...segments.flatMap((s) => (s.passengers ?? []).map((x) => x.passenger_id).filter(Boolean)),
+        ...(offer.slices ?? []).flatMap((slice) =>
+          (slice.segments ?? []).flatMap((s) => (s.passengers ?? []).map((x) => x.passenger_id).filter(Boolean)),
+        ),
       ];
       const amount = Number(offer.total_amount ?? 0);
       const currency = offer.total_currency ?? 'USD';
@@ -125,7 +179,7 @@ export class DuffelFlightProvider implements FlightProviderApi {
         id: offer.id,
         type: 'flight' as const,
         provider: 'duffel' as const,
-        title: `${originCode} -> ${destCode}`,
+        title: `${outbound.origin} -> ${outbound.destination}`,
         subtitle: `${offer.owner?.name ?? 'Duffel flight'} · ${segments.length <= 1 ? 'non-stop' : `${segments.length - 1} stop`} · ${slice?.duration ?? departingAt ?? departureDate}`,
         amount_thb: Math.round(amountThb),
         meta: {
@@ -133,18 +187,19 @@ export class DuffelFlightProvider implements FlightProviderApi {
           total_amount: offer.total_amount,
           total_currency: currency,
           passenger_ids: Array.from(new Set(passengerIds)),
-          origin: originCode,
-          destination: destCode,
-          dep_at: departingAt,
-          arr_at: arrivingAt,
-          carrier,
-          carrier_name: carrierName,
-          flight_number: flightNumber,
-          stops,
-          duration: slice?.duration ?? null,
-          departing_at: departingAt,
-          arriving_at: arrivingAt,
-          segments: itinerary,
+          origin: outbound.origin,
+          destination: outbound.destination,
+          dep_at: outbound.dep_at,
+          arr_at: outbound.arr_at,
+          carrier: outbound.carrier,
+          carrier_name: outbound.carrier_name,
+          flight_number: outbound.flight_number,
+          stops: outbound.stops,
+          duration: outbound.duration,
+          departing_at: outbound.departing_at,
+          arriving_at: outbound.arriving_at,
+          segments: outbound.segments,
+          slices: mappedSlices,
           raw: offer,
         },
       };

@@ -326,6 +326,7 @@ export interface SearchBookingRequest {
   origin?: string;
   destination?: string;
   depart_date?: string;
+  return_date?: string;
   city?: string;
   check_in?: string;
   nights?: number;

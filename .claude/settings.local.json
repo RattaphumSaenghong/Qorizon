@@ -144,7 +144,9 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"http://localhost:3000/api/v1/bookings/price-calendar?origin=BKK&destination=KIX&year=2026&month=8\")",
       "Bash(curl -s \"http://localhost:3000/api/v1/bookings/price-calendar?origin=BKK&destination=KIX&year=2026&month=8\")",
       "Bash(curl -s -X POST \"http://localhost:3000/api/v1/bookings/search\" -H \"Content-Type: application/json\" -d '{\"type\":\"flight\",\"origin\":\"BKK\",\"destination\":\"KIX\",\"depart_date\":\"2026-08-10\"}')",
-      "Bash(curl -s -X POST \"http://localhost:3000/api/v1/bookings/search\" -H \"Content-Type: application/json\" -d '{\"type\":\"flight\",\"origin\":\"BKK\",\"destination\":\"KIX\",\"depart_date\":\"2026-08-10\",\"return_date\":\"2026-08-17\"}')"
+      "Bash(curl -s -X POST \"http://localhost:3000/api/v1/bookings/search\" -H \"Content-Type: application/json\" -d '{\"type\":\"flight\",\"origin\":\"BKK\",\"destination\":\"KIX\",\"depart_date\":\"2026-08-10\",\"return_date\":\"2026-08-17\"}')",
+      "Bash(git push *)",
+      "Bash(find \"C:/Users/zacrt/Projects_1/claude-workspace\" -path \"*grill-me*SKILL.md\" 2>/dev/null | head; echo \"---\"; find \"C:/Users/zacrt\" -maxdepth 4 -name \"SKILL.md\" -path \"*grill*\" 2>/dev/null | head)"
     ]
   }
 }
