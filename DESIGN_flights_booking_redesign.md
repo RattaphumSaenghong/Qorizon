@@ -28,6 +28,12 @@ a **modal that only opens on Book**.
 3. **Result card** — Skyscanner-style: airline, depart→arrive times, duration,
    stops, price + Select.
 4. **Sorting** — three user-selectable tabs: **Cheapest / Fastest / Best**.
+5. **Round-trip model** — **combined offers, NOT a two-step picker.** Duffel
+   returns each round-trip as one offer containing both legs, priced together.
+   There is **no separate "select departure → select return" flow** — one search,
+   each card shows both legs stacked, one Select covers the whole round trip, then
+   passenger info. (Two one-way searches were considered and rejected: it would
+   mean two separate tickets/PNRs and usually higher fares.)
 
 ---
 
@@ -199,26 +205,26 @@ A centered modal (same backdrop/sheet pattern as the date modal:
 
 ---
 
-## 7. Backend gap — round-trip return leg (required for correct round-trip cards)
+## 7. Backend — round-trip slices (DONE) + remaining frontend work
 
-`trailr` already sends `return_date` and the Duffel provider adds the return
-**slice** to the offer request
-(`api/src/modules/bookings/providers/duffel.provider.ts`). **But** the provider
-maps only `offer.slices?.[0]` into `meta`, so the **return leg is invisible** in
-the result card. For a faithful round-trip card the implementer must:
+**Backend is done** (`api/src/modules/bookings/providers/duffel.provider.ts`):
+- `return_date` → second slice on the offer request.
+- Every slice is mapped via `mapSlice(...)` into `meta.slices: [{ origin,
+  destination, dep_at, arr_at, carrier, carrier_name, flight_number, stops,
+  duration, segments }, …]`. Top-level `meta.*` still mirror the outbound slice
+  for backward compat.
+- Search uses the **inline offers** from `offer_requests` (one Duffel call, not
+  two), sorted cheapest-first and capped at `OFFER_LIMIT = 20`.
 
-1. In `duffel.provider.ts`, map **all** slices into the offer meta, e.g.
-   `meta.slices: [{ summary fields per slice }]` (origin, destination, dep_at,
-   arr_at, carrier, carrier_name, flight_number, stops, duration, segments),
-   keeping the existing top-level fields as the outbound for backward compat.
-2. Extend `FlightSummary`/helpers in `bookingDisplay.ts` to read a slices array
-   (fall back to the single-slice fields when `meta.slices` is absent).
-3. `<FlightResultCard>` renders **two legs** (Outbound / Return) stacked when a
-   round-trip offer has two slices; one leg otherwise.
-
-If this backend change is out of scope for the first pass, the card should at
-least **label** round-trip offers as round-trip and show the outbound leg + total
-price (no silent implication that it's one-way).
+**Remaining frontend work for the combined two-leg card (decision §1.5):**
+1. Extend `FlightSummary`/helpers in `trailr/src/lib/bookingDisplay.ts` to read
+   the `meta.slices` array (fall back to the single-slice top-level fields when
+   `meta.slices` is absent or length ≤ 1).
+2. `<FlightResultCard>` renders **both legs stacked** (Outbound / Return labels)
+   when `meta.slices.length === 2`; a single leg otherwise. The price shown is the
+   **combined** `offer.amount_thb` (one fare for the whole round trip).
+3. **One Select** per card books the whole round trip → opens `<PassengerModal>`
+   (§6). There is no separate departure/return selection step.
 
 ---
 
@@ -237,6 +243,7 @@ price (no silent implication that it's one-way).
 - [ ] Cheapest / Fastest / Best tabs re-sort the list client-side; Best is default.
 - [ ] Tapping Select opens the passenger modal pre-summarizing the chosen flight;
       Confirm books via the existing flow with unchanged toasts/auth/trip-attach.
-- [ ] Round-trip: return leg shown (after §7) or at minimum clearly labeled.
+- [ ] Round-trip: card shows BOTH legs stacked (Outbound/Return) from
+      `meta.slices`, one combined price, one Select — no two-step picker.
 - [ ] One-way and round-trip search both return and render correctly.
-- [ ] `npx tsc --noEmit` clean in `trailr/` (and `api/` if §7 done).
+- [ ] `npx tsc --noEmit` clean in `trailr/` (backend §7 already done).

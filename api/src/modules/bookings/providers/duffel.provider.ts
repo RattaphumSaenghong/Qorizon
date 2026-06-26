@@ -33,6 +33,9 @@ interface DuffelOffer {
   passengers?: Array<{ id?: string }>;
 }
 
+// Max offers returned to the client. Sorted cheapest-first before slicing.
+const OFFER_LIMIT = 20;
+
 function stopLabel(stops: number): string {
   if (stops <= 0) return 'non-stop';
   return `${stops} stop${stops === 1 ? '' : 's'}`;
@@ -127,18 +130,30 @@ export class DuffelFlightProvider implements FlightProviderApi {
       }),
     });
     if (!requestRes.ok) throw new Error(`Duffel offer request failed: ${requestRes.status}`);
-    const requestData = (await requestRes.json()) as { data?: { id?: string } };
+    // offer_requests returns the full offer list inline by default, so we avoid a
+    // second round-trip to GET /air/offers. Fall back to that endpoint only if the
+    // inline list is somehow empty.
+    const requestData = (await requestRes.json()) as { data?: { id?: string; offers?: DuffelOffer[] } };
     const offerRequestId = requestData.data?.id;
     if (!offerRequestId) return [];
 
-    const offersRes = await fetch(`${this.base}/air/offers?offer_request_id=${offerRequestId}&limit=5`, {
-      headers: this.headers(),
-    });
-    if (!offersRes.ok) throw new Error(`Duffel offer search failed: ${offersRes.status}`);
-    const offersData = (await offersRes.json()) as { data?: DuffelOffer[] };
+    let rawOffers = requestData.data?.offers ?? [];
+    if (rawOffers.length === 0) {
+      const offersRes = await fetch(`${this.base}/air/offers?offer_request_id=${offerRequestId}&limit=${OFFER_LIMIT}`, {
+        headers: this.headers(),
+      });
+      if (!offersRes.ok) throw new Error(`Duffel offer search failed: ${offersRes.status}`);
+      const offersData = (await offersRes.json()) as { data?: DuffelOffer[] };
+      rawOffers = offersData.data ?? [];
+    }
+
+    // Cheapest first, capped — keeps the payload small and feeds the sort tabs.
+    const topOffers = [...rawOffers]
+      .sort((a, b) => Number(a.total_amount ?? 0) - Number(b.total_amount ?? 0))
+      .slice(0, OFFER_LIMIT);
 
     const usdThb = await this.fx.usdToThb();
-    return (offersData.data ?? []).map((offer) => {
+    return topOffers.map((offer) => {
       const mappedSlices = (offer.slices ?? []).map((slice, index) =>
         mapSlice(
           slice,
